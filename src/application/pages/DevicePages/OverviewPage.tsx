@@ -10,6 +10,7 @@ import { Card } from '@blueprintjs/core'
 import { Composition } from 'atomic-layout'
 import { IntervalRequester } from '@electricui/components-core'
 import { LightBulb } from '../../components/LightBulb'
+import { Data } from '../../components/Data'
 import { useMessageDataSource } from '@electricui/core-timeseries'
 import React from 'react'
 import { RouteComponentProps } from '@reach/router'
@@ -30,6 +31,14 @@ export const OverviewPage = (props: RouteComponentProps) => {
       <Composition areas={layoutDescription} gap={10} autoCols="1fr">
         {Areas => (
           <React.Fragment>
+             <Card>
+                <div style={{ textAlign: 'center', marginBottom: '1em' }}>
+                  <b>Vehicle Speed and Battery Efficiency</b>
+                </div>
+                <Data/>
+              </Card>
+              
+{/*             
             <Areas.Chart>
               <Card>
                 <div style={{ textAlign: 'center', marginBottom: '1em' }}>
@@ -42,14 +51,14 @@ export const OverviewPage = (props: RouteComponentProps) => {
                   <VerticalAxis />
                 </ChartContainer>
               </Card>
-            </Areas.Chart>
-
+            </Areas.Chart> */}
+{/* 
             <Areas.Light>
               <LightBulb
                 containerStyle={{ margin: '20px auto', width: '80%' }}
                 width="40vw"
               />
-            </Areas.Light>
+            </Areas.Light> */}
 
             <Areas.Slider>
               <Card>
