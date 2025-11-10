@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import { useHardwareState } from '@electricui/components-core'
 
 export const Data = () =>  {
