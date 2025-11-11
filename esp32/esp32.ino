@@ -1,5 +1,6 @@
-//Import the ElectricUI Library
+// Import the ElectricUI Library & interval-sender helper
 #include "electricui.h"
+#include "interval_send.h"   // <-- new include from electricui-interval-sender
 
 // Simple variables to modify the LED behaviour
 uint8_t   blink_enable = 1; // if the blinker should be running
@@ -22,6 +23,11 @@ eui_message_t tracked_variables[] =
   EUI_UINT16( "speed",   vehicle_speed),
 };
 
+// -------------------- interval sender storage --------------------
+// The interval_send helper requires a storage pool. Size '5' is ample for this demo.
+// See the interval_send README for details if you want to tune pool size.
+send_info_t iv_send_pool[5] = { 0 };
+
 void setup() 
 {
   // Setup the serial port and status LED
@@ -36,6 +42,17 @@ void setup()
 
   // Provide a identifier to make this board easy to find in the UI
   eui_setup_identifier( "hello", 5 );
+
+  // ---------- interval-sender initialisation (NEW) ----------
+  // Give the interval sender a pool and initialise it
+interval_send_init( iv_send_pool, 5 ); // <-- CORRECT: iv_send_pool decays to send_info_t*
+
+
+  // Register the variables we want to be auto-sent at 50ms intervals
+  // Match these strings exactly to the names in tracked_variables above.
+  interval_send_add_id( "battery", 50 );
+  interval_send_add_id( "speed", 50 );
+  // ----------------------------------------------------------
 
   led_timer = millis();
 }
@@ -61,6 +78,9 @@ void loop()
       else battery_efficiency = 6;
     }    
   }
+
+  // Let the interval sender process and dispatch any scheduled sends
+  interval_send_tick( millis() );
 
   digitalWrite( LED_BUILTIN, led_state ); //update the LED to match the intended state
 }
