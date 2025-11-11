@@ -5,7 +5,8 @@
 uint8_t   blink_enable = 1; // if the blinker should be running
 uint8_t   led_state  = 0;   // track if the LED is illuminated
 uint16_t  glow_time  = 200; // in milliseconds
-
+uint16_t  battery_efficiency = 6; // in kWh
+uint16_t  vehicle_speed = 10; //in km/h
 uint32_t  led_timer  = 0;   // track when the light turned on or off
 
 // Instantiate the communication interface's management object
@@ -17,6 +18,8 @@ eui_message_t tracked_variables[] =
   EUI_UINT8(  "led_blink",  blink_enable ),
   EUI_UINT8(  "led_state",  led_state ),
   EUI_UINT16( "lit_time",   glow_time ),
+  EUI_UINT16( "battery",   battery_efficiency ),
+  EUI_UINT16( "speed",   vehicle_speed),
 };
 
 void setup() 
@@ -48,6 +51,14 @@ void loop()
     {
       led_state = !led_state; //invert led state
       led_timer = millis();
+
+      // simulate changing vehicle speed
+      if(vehicle_speed == 10) vehicle_speed = 50;
+      else vehicle_speed = 10;
+
+      // simulate changing battery efficiency
+      if(battery_efficiency == 6) battery_efficiency = 7;
+      else battery_efficiency = 6;
     }    
   }
 

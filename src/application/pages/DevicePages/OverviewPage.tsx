@@ -10,34 +10,52 @@ import { Card } from '@blueprintjs/core'
 import { Composition } from 'atomic-layout'
 import { IntervalRequester, useDeviceManager } from '@electricui/components-core'
 import { LightBulb } from '../../components/LightBulb'
-import { Data } from '../../components/Data'
 import { useMessageDataSource } from '@electricui/core-timeseries'
-import React from 'react'
+import React, { useState } from 'react'
 import { RouteComponentProps } from '@reach/router'
 import { Slider } from '@electricui/components-desktop-blueprint'
-
-import { Button} from '@electricui/components-desktop-blueprint'
-import { ButtonGroup } from '@blueprintjs/core'
+import { Switch as BPSwitch } from '@blueprintjs/core';
 
 const layoutDescription = `
   ChartSpeed ChartBattery ChartLED
-  Light      Slider       Slider
-  Button
+  Light Slider Switch
 `
-const deviceManager = useDeviceManager() as any     // cast to 'any' to reach internals
-  const device =
-    deviceManager.connectedDevices?.[0] ??
-    deviceManager.devices?.[0] ??
-    null
 
-  const propulsionOn = () => device?.write({ propulsion: 1 })
-  const propulsionOff = () => device?.write({ propulsion: 0 })
 
 export const OverviewPage = (props: RouteComponentProps) => {
   const ledStateDataSource = useMessageDataSource('led_state');
   const batteryDataSource = useMessageDataSource('battery');
   const speedDataSource = useMessageDataSource('speed');
-  
+
+  const deviceManager = useDeviceManager() as any     // cast to 'any' to reach internals
+  const device =
+    deviceManager.connectedDevices?.[0] ??
+    deviceManager.devices?.[0] ??
+    null
+
+  // local, controlled state for the propulsion switch (optimistic UI)
+  const [propulsionOnState, setPropulsionOnState] = useState<boolean>(false)
+
+
+  const handlePropulsionToggle = (e: any) => {
+    // Switch from electricui/blueprint can call onChange with an event or boolean.
+    const checked =
+      typeof e === 'boolean' ? e : (e && e.target ? !!e.target.checked : !propulsionOnState)
+
+    // optimistic UI update
+    setPropulsionOnState(checked)
+
+    // send the command to the device
+    // send 1 for on, 0 for off (matching your earlier device.write usage)
+    if (device?.write) {
+      device.write({ propulsion: checked ? 1 : 0 })
+    } else {
+      // dev fallback: log if no device is found
+      // (remove this in production)
+      // console.warn('No device available to write propulsion state', checked)
+    }
+  }
+
   return (
     <React.Fragment>
       <IntervalRequester interval={50} messageIDs={['led_state','battery','speed']} />
@@ -45,7 +63,7 @@ export const OverviewPage = (props: RouteComponentProps) => {
       <Composition areas={layoutDescription} gap={10} autoCols="1fr">
         {Areas => (
           <React.Fragment>
-            
+
              {/* DISPLAYS SPEED */}
             <Areas.ChartSpeed>
               <Card>
@@ -65,7 +83,7 @@ export const OverviewPage = (props: RouteComponentProps) => {
             <Areas.ChartBattery>
               <Card>
                 <div style={{ textAlign: 'center', marginBottom: '1em' }}>
-                  <b>Battery Efficiency</b>
+                  <b>Battery Efficiencyasdfs</b>
                 </div>
                 <ChartContainer>
                   <LineChart key="battery" dataSource={batteryDataSource} />
@@ -112,25 +130,19 @@ export const OverviewPage = (props: RouteComponentProps) => {
               </Card>
             </Areas.Slider>
 
-            {/* BUTTON TO CONTROL PROPULSION SWITCH */}
-            {/* NOTE: PERHAPS SWITCH TO SLIDER FOR BETTER CONTROL? */}
-            <Areas.Button>
+            {/* PROPULSION SWITCH */}
+            <Areas.Switch>
               <Card>
-              <div >
-                <ButtonGroup>
-                  <Button intent="success" large onClick={propulsionOn}>
-                      Propulsion On
-                  </Button>
-                  
-                  <Button intent="danger"  large onClick = {propulsionOff}>
-                      Propulsion Off 
-                  </Button>
-
-                </ButtonGroup>
-
-              </div>
+                <div style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                 <BPSwitch
+  checked={propulsionOnState}
+  onChange={handlePropulsionToggle}
+>
+  Toggle Propulsion
+</BPSwitch>
+                </div>
               </Card>
-            </Areas.Button>
+            </Areas.Switch>
 
           </React.Fragment>
         )}
