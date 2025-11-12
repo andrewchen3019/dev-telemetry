@@ -70,12 +70,12 @@ void loop()
       led_timer = millis();
 
       // simulate changing vehicle speed
-      if(vehicle_speed == 10) vehicle_speed = 50;
-      else vehicle_speed = 10;
+      vehicle_speed += random(-1 * vehicle_speed * 100.0, vehicle_speed * 100.0) / 100.0;
+
 
       // simulate changing battery efficiency
-      if(battery_efficiency == 6) battery_efficiency = 7;
-      else battery_efficiency = 6;
+
+      battery_efficiency += random(-1 * battery_efficiency * 100.0,battery_efficiency*100.0) / 100.0;
     }    
   }
 
