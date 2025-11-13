@@ -9,7 +9,9 @@ uint16_t  glow_time  = 200; // in milliseconds
 uint16_t  battery_efficiency = 6; // in kWh
 uint16_t  vehicle_speed = 10; //in km/h
 uint32_t  led_timer  = 0;   // track when the light turned on or off
+uint8_t propulsion = 0;
 
+void eui_serial_callback(uint8_t message);
 // Instantiate the communication interface's management object
 eui_interface_t serial_comms = EUI_INTERFACE( &serial_write ); 
 
@@ -21,6 +23,7 @@ eui_message_t tracked_variables[] =
   EUI_UINT16( "lit_time",   glow_time ),
   EUI_UINT16( "battery",   battery_efficiency ),
   EUI_UINT16( "speed",   vehicle_speed),
+   EUI_UINT8(  "propulsion", propulsion )
 };
 
 // -------------------- interval sender storage --------------------
@@ -35,7 +38,10 @@ void setup()
   pinMode( LED_BUILTIN, OUTPUT );
 
   // Provide the library with the interface we just setup
+  serial_comms.interface_cb = &eui_serial_callback;
+
   eui_setup_interface( &serial_comms );
+
 
   // Provide the tracked variables to the library
   EUI_TRACK( tracked_variables );
@@ -56,10 +62,33 @@ interval_send_init( iv_send_pool, 5 ); // <-- CORRECT: iv_send_pool decays to se
 
   led_timer = millis();
 }
+void eui_serial_callback( uint8_t message ) {
+  // EUI_CB_TRACKED indicates a tracked message was received & applied
+  if ( message == EUI_CB_TRACKED ) {
+    // packet id string lives in the interface struct's packet.id_in
+    // the interface variable name in your sketch is serial_comms
+    char *id = (char*)serial_comms.packet.id_in;
+
+    // compare to the messageID we care about
+    if ( strcmp(id, "propulsion") == 0 ) {
+      // propulsion var has already been updated by the electricui library,
+      // so read propulsion and react immediately
+   if (propulsion) {
+      Serial.println("Propulsion is on");
+  } else {
+    // turn it off
+    Serial.println("Propulsion is off");
+  }
+      // if you want to publish confirmation back to UI:
+      // eui_send_tracked("propulsion"); // (sends current value back to UI)
+    }
+  }
+}
 
 void loop() 
 {
   serial_rx_handler();  //check for new inbound data
+
 
   if( blink_enable )
   {
@@ -70,12 +99,22 @@ void loop()
       led_timer = millis();
 
       // simulate changing vehicle speed
-      vehicle_speed += random(-1 * vehicle_speed * 100.0, vehicle_speed * 100.0) / 100.0;
+      // vehicle_speed = vehicle_speed + sin(vehicle_speed); //random(-1 * vehicle_speed * 100.0, vehicle_speed * 100.0) / 100.0;
+      // battery_efficiency += battery_efficiency + sin(battery_efficiency);//random(-1 * battery_efficiency * 100.0,battery_efficiency*100.0) / 100.0;
 
+      static float phase = 0.0f;
+      phase += 0.1f; // adjust rate of oscillation
 
-      // simulate changing battery efficiency
+      // vary around a base value with a sine wave
+      vehicle_speed = 50.0f + 20.0f * sin(phase); // 50 ± 20 km/h
 
-      battery_efficiency += random(-1 * battery_efficiency * 100.0,battery_efficiency*100.0) / 100.0;
+      // random small jitter for realism
+      vehicle_speed += random(-10, 11) / 10.0f;
+
+      // keep battery variation too
+      battery_efficiency = constrain(
+        battery_efficiency + random(-2, 3), 0, 100
+      );
     }    
   }
 
