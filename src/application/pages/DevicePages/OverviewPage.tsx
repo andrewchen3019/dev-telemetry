@@ -15,17 +15,18 @@ import React, { useState } from 'react'
 import { RouteComponentProps } from '@reach/router'
 import { Slider } from '@electricui/components-desktop-blueprint'
 import { Switch as BPSwitch } from '@blueprintjs/core';
+import { Statistic } from '@electricui/components-desktop-blueprint'
 
 const layoutDescription = `
   ChartSpeed ChartBattery
-  Slider Switch
+  Slider Switch Statistic
 `
 
 
 export const OverviewPage = (props: RouteComponentProps) => {
   const ledStateDataSource = useMessageDataSource('led_state');
-  const batteryDataSource = useMessageDataSource('battery');
-  const speedDataSource = useMessageDataSource('speed');
+  const batteryEfficiencyDataSource = useMessageDataSource('battery'); //vehicle efficiency 
+  const speedDataSource = useMessageDataSource('speed'); //vehicle speed
 
   const deviceManager = useDeviceManager() as any     // cast to 'any' to reach internals
   const device =
@@ -86,7 +87,7 @@ export const OverviewPage = (props: RouteComponentProps) => {
                   <b>Battery Efficiency</b>
                 </div>
                 <ChartContainer>
-                  <LineChart key="battery" dataSource={batteryDataSource} />
+                  <LineChart key="battery" dataSource={batteryEfficiencyDataSource} />
                   <RealTimeDomain window={10000} />
                   <TimeAxis />
                   <VerticalAxis />
@@ -137,14 +138,26 @@ export const OverviewPage = (props: RouteComponentProps) => {
               <Card>
                 <div style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
                  <BPSwitch
-  checked={propulsionOnState}
-  onChange={handlePropulsionToggle}
->
-  Toggle Propulsion
-</BPSwitch>
+                    checked={propulsionOnState}
+                    onChange={handlePropulsionToggle}
+                    >
+                    Toggle Propulsion
+                  </BPSwitch>
                 </div>
               </Card>
             </Areas.Switch>
+
+            {/* Voltage Reading */}
+            <Areas.Statistic>
+              <Card>
+                <div style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <Statistic accessor="boiler_w" 
+                    label="Propulsion Voltage"
+                    suffix = "V"
+                    color="#e72305ff" />
+                </div>
+              </Card>
+            </Areas.Statistic>
 
           </React.Fragment>
         )}
