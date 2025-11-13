@@ -31,6 +31,9 @@
     "dmg-builder": {
       "unplugged": true
     },
+    "electron@35.0.3": {
+      "unplugged": true
+    },
     "electron": {
       "unplugged": true
     },
@@ -187,7 +190,8 @@
     "fsevents": "2.3.2",
     "three": "0.174.0",
     "three-stdlib": "2.35.14",
-    "upath": "^1.2.0"
+    "upath": "^1.2.0",
+    "electron": "portal:/Users/anyakrislav/tmp-electron/node_modules/electron"
   },
   "scripts": {
     "build": "electricui-build-tools app && electron-builder",

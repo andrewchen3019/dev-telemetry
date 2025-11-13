@@ -118,12 +118,12 @@ export const OverviewPage = (props: RouteComponentProps) => {
 
               <Card>
                 <div style={{ margin: 20 }}>
-                    <div style={{ margin: 10 }}>Transmission Frequency</div>
+                    <div style={{ margin: 10 }}>Transmission Frequency (ms) </div>
                   <Slider
                     min={20}
-                    max={1020}
-                    stepSize={10}
-                    labelStepSize={100}
+                    max={120}
+                    stepSize={5}
+                    labelStepSize={5}
                     sendOnlyOnRelease
                   >
                     <Slider.Handle accessor="lit_time" />
