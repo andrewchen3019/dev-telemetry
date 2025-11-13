@@ -17,8 +17,8 @@ import { Slider } from '@electricui/components-desktop-blueprint'
 import { Switch as BPSwitch } from '@blueprintjs/core';
 
 const layoutDescription = `
-  ChartSpeed ChartBattery ChartLED
-  Light Slider Switch
+  ChartSpeed ChartBattery
+  Slider Switch
 `
 
 
@@ -83,7 +83,7 @@ export const OverviewPage = (props: RouteComponentProps) => {
             <Areas.ChartBattery>
               <Card>
                 <div style={{ textAlign: 'center', marginBottom: '1em' }}>
-                  <b>Battery Efficiencyasdfs</b>
+                  <b>Battery Efficiency</b>
                 </div>
                 <ChartContainer>
                   <LineChart key="battery" dataSource={batteryDataSource} />
@@ -95,7 +95,7 @@ export const OverviewPage = (props: RouteComponentProps) => {
             </Areas.ChartBattery>
 
            {/* DISPLAYS LED STATE */}
-            <Areas.ChartLED>
+            {/* <Areas.ChartLED>
               <Card>
                 <div style={{ textAlign: 'center', marginBottom: '1em' }}>
                   <b>LED State</b>
@@ -107,16 +107,18 @@ export const OverviewPage = (props: RouteComponentProps) => {
                   <VerticalAxis />
                 </ChartContainer>
               </Card>
-            </Areas.ChartLED>
+            </Areas.ChartLED> */}
 
-            <Areas.Light>
+            {/* <Areas.Light>
               <LightBulb containerStyle={{ margin: '20px auto', width: '80%' }} width="40vw" />
-            </Areas.Light>
+            </Areas.Light> */}
 
           {/* SLIDER FOR LED FREQUENCY */}
             <Areas.Slider>
+
               <Card>
                 <div style={{ margin: 20 }}>
+                    <div style={{ margin: 10 }}>Transmission Frequency</div>
                   <Slider
                     min={20}
                     max={1020}
