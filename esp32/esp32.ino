@@ -100,7 +100,7 @@ void setup()
 {
   // Setup the serial port and status LED
   Serial.begin(115200);               // keep for debug / Heltec prints
-  Serial1.begin(115200, SERIAL_8N1, EUI_RX_PIN, EUI_TX_PIN); // Serial1 for ElectricUI
+  //Serial1.begin(115200, SERIAL_8N1, EUI_RX_PIN, EUI_TX_PIN); // Serial1 for ElectricUI
   // SETTING UP LORA
   delay(50);
 
@@ -310,15 +310,15 @@ void loop()
 void serial_rx_handler()
 {
   // While we have data, we will pass those bytes to the ElectricUI parser
-  while( Serial1.available() > 0 )  
+  while( Serial.available() > 0 )  
   {  
-    eui_parse( Serial1.read(), &serial_comms );  // Ingest a byte
+    eui_parse( Serial.read(), &serial_comms );  // Ingest a byte
   }
 }
   
 void serial_write( uint8_t *data, uint16_t len )
 {
-  Serial1.write( data, len ); //output on the main serial port
+  Serial.write( data, len ); //output on the main serial port
 }
 
 
