@@ -16,6 +16,7 @@ uint16_t  battery_efficiency = 6; // in kWh
 uint16_t  vehicle_speed = 10; //in km/h
 uint32_t  led_timer  = 0;   // track when the light turned on or off
 uint8_t propulsion = 0;
+uint8_t voltage = 1;
 uint8_t propulsion_before = 0;
 
 void eui_serial_callback(uint8_t message);
@@ -277,7 +278,7 @@ void loop()
     // Check if the LED has been on for the configured duration
     if( millis() - led_timer >= glow_time )
     {
-      led_state = !led_state; //invert led state
+      //led_state = !led_state; //invert led state
       led_timer = millis();
 
       // simulate changing vehicle speed
