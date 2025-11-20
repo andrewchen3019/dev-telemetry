@@ -98,6 +98,16 @@ export const Header = (
               }}
               active={page === 'secondary'}
             />
+                       <Button
+              minimal
+              large
+              icon={IconNames.SETTINGS}
+              text="FileLogger"
+              onClick={() => {
+                navigate(`/devices/${props.deviceID}/file-logger`)
+              }}
+              active={page === 'file-logger'}
+            />
           </Navbar.Group>{' '}
         </div>
       </Navbar>

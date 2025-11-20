@@ -18,9 +18,8 @@ import { Switch as BPSwitch } from '@blueprintjs/core';
 import { Statistic } from '@electricui/components-desktop-blueprint'
 
 const layoutDescription = `
-  ChartSpeed ChartBattery
-  Slider Switch Statistic
-`
+ChartSpeed ChartBattery 
+Slider Switch `
 
 
 export const OverviewPage = (props: RouteComponentProps) => {
