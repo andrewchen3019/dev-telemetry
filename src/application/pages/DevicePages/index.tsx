@@ -8,7 +8,7 @@ import React from 'react'
 import { Header } from '../../components/Header'
 import { OverviewPage } from './OverviewPage'
 import { SecondaryPage } from './SecondaryPage'
-
+import { FileLogger } from './FileLogger'
 interface InjectDeviceIDFromLocation {
   deviceID?: string
 }
@@ -39,6 +39,7 @@ export const DevicePages = (
           <Router primary={false}>
             <OverviewPage path="/" />
             <SecondaryPage path="secondary" />
+            <FileLogger path="file-logger" />
           </Router>
         </div>
       </div>
