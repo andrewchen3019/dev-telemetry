@@ -30,7 +30,8 @@ eui_message_t tracked_variables[] =
   EUI_UINT16( "lit_time",   glow_time ),
   EUI_UINT16( "battery",   battery_efficiency ),
   EUI_UINT16( "speed",   vehicle_speed),
-   EUI_UINT8(  "propulsion", propulsion )
+  EUI_UINT8(  "propulsion", propulsion ),
+  EUI_UINT8(  "voltage", voltage)
 };
 
 // -------------------- interval sender storage --------------------
