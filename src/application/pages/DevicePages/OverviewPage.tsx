@@ -6,65 +6,94 @@ import {
   VerticalAxis,
 } from '@electricui/components-desktop-charts'
 
-import { Card } from '@blueprintjs/core'
+import { Card, Button } from '@blueprintjs/core'
 import { Composition } from 'atomic-layout'
 import { IntervalRequester, useDeviceManager } from '@electricui/components-core'
-import { LightBulb } from '../../components/LightBulb'
 import { useMessageDataSource } from '@electricui/core-timeseries'
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { RouteComponentProps } from '@reach/router'
 import { Slider } from '@electricui/components-desktop-blueprint'
-import { Switch as BPSwitch } from '@blueprintjs/core';
 import { Statistic } from '@electricui/components-desktop-blueprint'
 
 const layoutDescription = `
-ChartSpeed ChartBattery 
-Slider Switch `
+  ChartSpeed ChartBattery ChartDistance
+  Slider Switch DistanceStat
+  Statistic`
 
 
 export const OverviewPage = (props: RouteComponentProps) => {
-  const ledStateDataSource = useMessageDataSource('led_state');
-  const batteryEfficiencyDataSource = useMessageDataSource('battery'); //vehicle efficiency 
-  const speedDataSource = useMessageDataSource('speed'); //vehicle speed
+  const ledStateDataSource = useMessageDataSource('led_state')
+  const batteryEfficiencyDataSource = useMessageDataSource('battery')
+  const speedDataSource = useMessageDataSource('speed')
+  const distanceDataSource = useMessageDataSource('dist') // <-- change if your message ID differs
 
-  const deviceManager = useDeviceManager() as any     // cast to 'any' to reach internals
+  const deviceManager = useDeviceManager() as any
   const device =
     deviceManager.connectedDevices?.[0] ??
     deviceManager.devices?.[0] ??
     null
 
-  // local, controlled state for the propulsion switch (optimistic UI)
+  // local, optimistic UI state for whether relay/propulsion is on
   const [propulsionOnState, setPropulsionOnState] = useState<boolean>(false)
 
+  // Optional: sync state from the device if the device publishes a 'propulsion' or 'relay_state' message.
+  // If your device publishes a message like 'propulsion' or 'relay_state', subscribe to it and keep local state in sync.
+  // Example (uncomment if the message exists):
+  // const propulsionStateSource = useMessageDataSource('propulsion_state')
+  // useEffect(() => {
+  //   const sub = propulsionStateSource.subscribe(v => {
+  //     if (typeof v === 'number') setPropulsionOnState(Boolean(v))
+  //   })
+  //   return () => sub.unsubscribe()
+  // }, [propulsionStateSource])
 
-  const handlePropulsionToggle = (e: any) => {
-    // Switch from electricui/blueprint can call onChange with an event or boolean.
-    const checked =
-      typeof e === 'boolean' ? e : (e && e.target ? !!e.target.checked : !propulsionOnState)
+  const handleToggleRelay = async () => {
+    const next = !propulsionOnState
+    setPropulsionOnState(next) // optimistic UI
 
-    // optimistic UI update
-    setPropulsionOnState(checked)
-
-    // send the command to the device
-    // send 1 for on, 0 for off (matching your earlier device.write usage)
+    // IMPORTANT: choose the message id that your bridge/connected device expects.
+    // Many setups use e.g. { propulsion: 1 } (as in your example) — adapt below to match the bridge.
     if (device?.write) {
-      device.write({ propulsion: checked ? 1 : 0 })
+      // two example payload shapes — pick one that your bridge maps to a CMD_RELAY:
+      // 1) { propulsion: 1 }       <-- if bridge listens to "propulsion"
+      // 2) { relay: 1 }            <-- if bridge listens to "relay"
+      // 3) { cmd_relay: 1 }        <-- or any other mapping implemented on the bridge
+      //
+      // CHANGE THIS OBJECT to match your bridge firmware's expected message key
+      try {
+        await device.write({ propulsion: next ? 1 : 0 })
+      } catch (err) {
+        // if write fails, revert optimistic update
+        console.warn('device.write failed', err)
+        setPropulsionOnState(!next)
+      }
     } else {
-      // dev fallback: log if no device is found
-      // (remove this in production)
-      // console.warn('No device available to write propulsion state', checked)
+      // dev fallback: no device connected
+      console.warn('No device available to write propulsion state', next)
     }
   }
 
+  // Distance numeric for Statistic card (last value)
+  const [lastDistance, setLastDistance] = useState<number | null>(null)
+  useEffect(() => {
+    // subscribe to the distance data source (if available)
+    // dataSource exposes `.subscribe` in the electricui timeseries implementation
+    if (!distanceDataSource) return
+    const sub = distanceDataSource.subscribe((v: any) => {
+      // Expect a numeric payload in mm, adjust if your bridge publishes different units
+      if (typeof v === 'number') setLastDistance(v)
+      else if (v && typeof v.value === 'number') setLastDistance(v.value)
+    })
+    return () => sub.unsubscribe()
+  }, [distanceDataSource])
+
   return (
     <React.Fragment>
-      <IntervalRequester interval={50} messageIDs={['led_state','battery','speed']} />
+      <IntervalRequester interval={50} messageIDs={['led_state','battery','speed','ultrasonic']} />
 
       <Composition areas={layoutDescription} gap={10} autoCols="1fr">
         {Areas => (
           <React.Fragment>
-
-             {/* DISPLAYS SPEED */}
             <Areas.ChartSpeed>
               <Card>
                 <div style={{ textAlign: 'center', marginBottom: '1em' }}>
@@ -79,7 +108,6 @@ export const OverviewPage = (props: RouteComponentProps) => {
               </Card>
             </Areas.ChartSpeed>
 
-            {/* DISPLAYS BATTERY EFFICIENCY */}
             <Areas.ChartBattery>
               <Card>
                 <div style={{ textAlign: 'center', marginBottom: '1em' }}>
@@ -94,31 +122,24 @@ export const OverviewPage = (props: RouteComponentProps) => {
               </Card>
             </Areas.ChartBattery>
 
-           {/* DISPLAYS LED STATE */}
-            {/* <Areas.ChartLED>
+            <Areas.ChartDistance>
               <Card>
                 <div style={{ textAlign: 'center', marginBottom: '1em' }}>
-                  <b>LED State</b>
+                  <b>Ultrasonic Distance (mm)</b>
                 </div>
                 <ChartContainer>
-                  <LineChart key="led" dataSource={ledStateDataSource} />
-                  <RealTimeDomain window={10000} />
+                  <LineChart key="distance" dataSource={distanceDataSource} />
+                  <RealTimeDomain window={15000} />
                   <TimeAxis />
                   <VerticalAxis />
                 </ChartContainer>
               </Card>
-            </Areas.ChartLED> */}
+            </Areas.ChartDistance>
 
-            {/* <Areas.Light>
-              <LightBulb containerStyle={{ margin: '20px auto', width: '80%' }} width="40vw" />
-            </Areas.Light> */}
-
-          {/* SLIDER FOR LED FREQUENCY */}
             <Areas.Slider>
-
               <Card>
                 <div style={{ margin: 20 }}>
-                    <div style={{ margin: 10 }}>Transmission Frequency (ms) </div>
+                  <div style={{ margin: 10 }}>Transmission Frequency (ms) </div>
                   <Slider
                     min={20}
                     max={120}
@@ -132,32 +153,42 @@ export const OverviewPage = (props: RouteComponentProps) => {
               </Card>
             </Areas.Slider>
 
-            {/* PROPULSION SWITCH */}
             <Areas.Switch>
               <Card>
                 <div style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-                 <BPSwitch
-                    checked={propulsionOnState}
-                    onChange={handlePropulsionToggle}
-                    >
-                    Toggle Propulsion
-                  </BPSwitch>
+                  <Button
+                    intent={propulsionOnState ? 'success' : 'primary'}
+                    text={propulsionOnState ? 'TURN RELAY OFF' : 'TURN RELAY ON'}
+                    onClick={handleToggleRelay}
+                    large
+                  />
                 </div>
               </Card>
             </Areas.Switch>
 
-            {/* Voltage Reading */}
+            <Areas.DistanceStat>
+              <Card>
+                <div style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#666' }}>Last Distance</div>
+                    <div style={{ fontSize: 20 }}>
+                      {lastDistance === null ? '—' : `${lastDistance} mm`}
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            </Areas.DistanceStat>
+
             <Areas.Statistic>
               <Card>
                 <div style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <Statistic accessor="boiler_w" 
+                  <Statistic accessor="voltage"
                     label="Propulsion Voltage"
                     suffix = "V"
-                    color="#e72305ff" />
+                    color="#ffab9eff" />
                 </div>
               </Card>
             </Areas.Statistic>
-
           </React.Fragment>
         )}
       </Composition>
