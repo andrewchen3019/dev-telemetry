@@ -1,3 +1,7 @@
+// OverviewPage.tsx
+import React, { useState, useEffect, useRef, useMemo } from 'react'
+import { RouteComponentProps } from '@reach/router'
+
 import {
   ChartContainer,
   LineChart,
@@ -7,25 +11,138 @@ import {
 } from '@electricui/components-desktop-charts'
 
 import { Card, Button } from '@blueprintjs/core'
-import { Composition } from 'atomic-layout'
 import { IntervalRequester, useDeviceManager } from '@electricui/components-core'
 import { useMessageDataSource } from '@electricui/core-timeseries'
-import React, { useState, useEffect } from 'react'
-import { RouteComponentProps } from '@reach/router'
 import { Slider } from '@electricui/components-desktop-blueprint'
 import { Statistic } from '@electricui/components-desktop-blueprint'
 
-const layoutDescription = `
-  ChartSpeed ChartBattery ChartDistance
-  Slider Switch DistanceStat
-  Statistic`
+/**
+ * A simple CSS-grid layout to avoid atomic-layout version/layout quirks.
+ * Three columns on wide screens, stacks on narrow screens.
+ */
+const gridStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(3, 1fr)',
+  gap: '12px',
+  alignItems: 'stretch',
+  width: '100%',
+  boxSizing: 'border-box',
+  padding: '12px',
+  gridAutoRows: 'minmax(120px, auto)',
+}
 
+/** Helper to try several common accessors to return the latest numeric value. */
+function getLatestFromDataSource(dataSource: any) {
+  if (!dataSource) return undefined
+  if (typeof dataSource.getLatest === 'function') {
+    try { return dataSource.getLatest() } catch {}
+  }
+  if (dataSource.latest !== undefined) return dataSource.latest
+  if (dataSource.latestValue !== undefined) return dataSource.latestValue
+  if (dataSource.value !== undefined) return dataSource.value
+  if (Array.isArray(dataSource.data) && dataSource.data.length) {
+    const last = dataSource.data[dataSource.data.length - 1]
+    if (last && typeof last.y !== 'undefined') return last.y
+    if (last && typeof last.value !== 'undefined') return last.value
+  }
+  if (typeof dataSource.peek === 'function') {
+    try { const v = dataSource.peek(); if (v !== undefined) return v } catch {}
+  }
+  if (typeof dataSource.get === 'function') {
+    try { const v = dataSource.get(); if (v !== undefined) return v } catch {}
+  }
+  return undefined
+}
+
+/** Defensive wrapper providing the interface charts expect */
+function makeSafeDataSource(original: any) {
+  const noop = {
+    subscribe: (_cb: any) => () => {},
+    getLatest: () => undefined,
+    hasCapability: (_cap?: any) => false,
+    getRange: (_opts?: any) => [],
+    isQueryableCollection: () => false,
+  }
+  if (!original) return noop
+
+  const origHasCapability = typeof original.hasCapability === 'function'
+    ? (cap: string) => !!original.hasCapability(cap)
+    : (_cap: string) => {
+        try {
+          if (Array.isArray(original.capabilities)) return original.capabilities.includes(_cap as any)
+          if (original.capabilities && typeof original.capabilities[_cap] !== 'undefined') return !!original.capabilities[_cap]
+        } catch (e) {}
+        return false
+      }
+
+  if (typeof original.subscribe === 'function') {
+    return {
+      subscribe: (cb: any) => {
+        try {
+          const unsub = original.subscribe(cb)
+          if (typeof unsub === 'function') return unsub
+          if (unsub && typeof unsub.unsubscribe === 'function') return () => unsub.unsubscribe()
+        } catch (e) {
+          console.warn('original.subscribe threw', e)
+        }
+        return () => {}
+      },
+      getLatest: () => getLatestFromDataSource(original),
+      hasCapability: (cap: string) => {
+        if (cap === 'subscribe') return true
+        if (cap === 'getLatest') return typeof original.getLatest === 'function' || getLatestFromDataSource(original) !== undefined
+        return origHasCapability(cap)
+      },
+      getRange: (opts?: any) => {
+        if (typeof original.getRange === 'function') {
+          try { return original.getRange(opts) } catch { return [] }
+        }
+        return []
+      },
+      isQueryableCollection: () => {
+        try {
+          if (typeof original.isQueryableCollection === 'function') return !!original.isQueryableCollection()
+          if (original.isQueryableCollection !== undefined) return !!original.isQueryableCollection
+        } catch (e) {}
+        return false
+      },
+    }
+  }
+
+  // Polling wrapper
+  return {
+    subscribe: (cb: any) => {
+      const intervalMs = 100
+      let lastSeen: any = undefined
+      const tid = window.setInterval(() => {
+        const latest = getLatestFromDataSource(original)
+        if (latest !== undefined && latest !== lastSeen) {
+          lastSeen = latest
+          try { cb(latest) } catch (e) {}
+        }
+      }, intervalMs)
+      return () => { window.clearInterval(tid) }
+    },
+    getLatest: () => getLatestFromDataSource(original),
+    hasCapability: (cap: string) => {
+      if (cap === 'subscribe') return true
+      if (cap === 'getLatest') return getLatestFromDataSource(original) !== undefined
+      return origHasCapability(cap)
+    },
+    getRange: (_opts?: any) => [],
+    isQueryableCollection: () => {
+      try { if (original.isQueryableCollection !== undefined) return !!original.isQueryableCollection } catch (e) {}
+      return false
+    },
+  }
+}
 
 export const OverviewPage = (props: RouteComponentProps) => {
   const ledStateDataSource = useMessageDataSource('led_state')
   const batteryEfficiencyDataSource = useMessageDataSource('battery')
   const speedDataSource = useMessageDataSource('speed')
-  const distanceDataSource = useMessageDataSource('dist') // <-- change if your message ID differs
+  const distanceDataSource = useMessageDataSource('ultrasonic')
+  const rssiDataSource = useMessageDataSource('rssi')
 
   const deviceManager = useDeviceManager() as any
   const device =
@@ -33,165 +150,223 @@ export const OverviewPage = (props: RouteComponentProps) => {
     deviceManager.devices?.[0] ??
     null
 
-  // local, optimistic UI state for whether relay/propulsion is on
   const [propulsionOnState, setPropulsionOnState] = useState<boolean>(false)
 
-  // Optional: sync state from the device if the device publishes a 'propulsion' or 'relay_state' message.
-  // If your device publishes a message like 'propulsion' or 'relay_state', subscribe to it and keep local state in sync.
-  // Example (uncomment if the message exists):
-  // const propulsionStateSource = useMessageDataSource('propulsion_state')
-  // useEffect(() => {
-  //   const sub = propulsionStateSource.subscribe(v => {
-  //     if (typeof v === 'number') setPropulsionOnState(Boolean(v))
-  //   })
-  //   return () => sub.unsubscribe()
-  // }, [propulsionStateSource])
-
-  const handleToggleRelay = async () => {
+  const handlePropulsionToggle = async () => {
     const next = !propulsionOnState
-    setPropulsionOnState(next) // optimistic UI
-
-    // IMPORTANT: choose the message id that your bridge/connected device expects.
-    // Many setups use e.g. { propulsion: 1 } (as in your example) — adapt below to match the bridge.
+    setPropulsionOnState(next)
     if (device?.write) {
-      // two example payload shapes — pick one that your bridge maps to a CMD_RELAY:
-      // 1) { propulsion: 1 }       <-- if bridge listens to "propulsion"
-      // 2) { relay: 1 }            <-- if bridge listens to "relay"
-      // 3) { cmd_relay: 1 }        <-- or any other mapping implemented on the bridge
-      //
-      // CHANGE THIS OBJECT to match your bridge firmware's expected message key
       try {
         await device.write({ propulsion: next ? 1 : 0 })
       } catch (err) {
-        // if write fails, revert optimistic update
         console.warn('device.write failed', err)
         setPropulsionOnState(!next)
       }
     } else {
-      // dev fallback: no device connected
       console.warn('No device available to write propulsion state', next)
     }
   }
 
-  // Distance numeric for Statistic card (last value)
+  // Last distance numeric
   const [lastDistance, setLastDistance] = useState<number | null>(null)
   useEffect(() => {
-    // subscribe to the distance data source (if available)
-    // dataSource exposes `.subscribe` in the electricui timeseries implementation
     if (!distanceDataSource) return
-    const sub = distanceDataSource.subscribe((v: any) => {
-      // Expect a numeric payload in mm, adjust if your bridge publishes different units
-      if (typeof v === 'number') setLastDistance(v)
-      else if (v && typeof v.value === 'number') setLastDistance(v.value)
-    })
-    return () => sub.unsubscribe()
+    if (typeof distanceDataSource.subscribe === 'function') {
+      try {
+        const unsub = distanceDataSource.subscribe((v: any) => {
+          const val = typeof v === 'number'
+            ? v
+            : (v && (v.value ?? v.y ?? v.latest ?? (Array.isArray(v.data) ? v.data[v.data.length - 1] : undefined))) ?? undefined
+          if (typeof val === 'number') setLastDistance(val)
+        })
+        return () => { if (typeof unsub === 'function') unsub() }
+      } catch (err) {
+        console.warn('distanceDataSource.subscribe threw, falling back to poll', err)
+      }
+    }
+    const pid = window.setInterval(() => {
+      try {
+        const latest = getLatestFromDataSource(distanceDataSource)
+        if (typeof latest === 'number') setLastDistance(latest)
+      } catch (e) {}
+    }, 150)
+    return () => window.clearInterval(pid)
   }, [distanceDataSource])
+
+  // Last RSSI numeric
+  const [lastRssi, setLastRssi] = useState<number | null>(null)
+  useEffect(() => {
+    if (!rssiDataSource) return
+    if (typeof rssiDataSource.subscribe === 'function') {
+      try {
+        const unsub = rssiDataSource.subscribe((v: any) => {
+          if (typeof v === 'number') {
+            setLastRssi(v > 200 ? v - 256 : v)
+          } else if (v && typeof v.value === 'number') {
+            const n = v.value
+            setLastRssi(n > 200 ? n - 256 : n)
+          }
+        })
+        return () => { if (typeof unsub === 'function') unsub() }
+      } catch (err) {
+        console.warn('rssiDataSource.subscribe threw, falling back to poll', err)
+      }
+    }
+    const pid = window.setInterval(() => {
+      try {
+        const latest = getLatestFromDataSource(rssiDataSource)
+        if (typeof latest === 'number') setLastRssi(latest > 200 ? latest - 256 : latest)
+      } catch (e) {}
+    }, 200)
+    return () => window.clearInterval(pid)
+  }, [rssiDataSource])
+
+  // Safe sources for charts
+  const safeDistanceSource = useMemo(() => makeSafeDataSource(distanceDataSource), [distanceDataSource])
+  const safeRssiSource = useMemo(() => makeSafeDataSource(rssiDataSource), [rssiDataSource])
+
+  // debug logging (open DevTools -> Console)
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('raw distanceDataSource:', distanceDataSource)
+    // eslint-disable-next-line no-console
+    console.log('wrapped safeDistanceSource:', safeDistanceSource)
+    // eslint-disable-next-line no-console
+    console.log('raw rssiDataSource:', rssiDataSource)
+  }, [distanceDataSource, rssiDataSource, safeDistanceSource])
 
   return (
     <React.Fragment>
-      <IntervalRequester interval={50} messageIDs={['led_state','battery','speed','ultrasonic']} />
+      <IntervalRequester interval={50} messageIDs={['led_state','battery','speed','ultrasonic','rssi']} />
 
-      <Composition areas={layoutDescription} gap={10} autoCols="1fr">
-        {Areas => (
-          <React.Fragment>
-            <Areas.ChartSpeed>
-              <Card>
-                <div style={{ textAlign: 'center', marginBottom: '1em' }}>
-                  <b>Speed</b>
-                </div>
-                <ChartContainer>
-                  <LineChart key="speed" dataSource={speedDataSource} />
-                  <RealTimeDomain window={10000} />
-                  <TimeAxis />
-                  <VerticalAxis />
-                </ChartContainer>
-              </Card>
-            </Areas.ChartSpeed>
+      <div style={gridStyle}>
+        {/* Speed Chart */}
+        <div style={{ gridColumn: '1 / 2' }}>
+          <Card>
+            <div style={{ textAlign:'center', marginBottom:8 }}><b>Speed</b></div>
+            <ChartContainer>
+              <LineChart key="speed" dataSource={speedDataSource} />
+              <RealTimeDomain window={10000} />
+              <TimeAxis />
+              <VerticalAxis />
+            </ChartContainer>
+          </Card>
+        </div>
 
-            <Areas.ChartBattery>
-              <Card>
-                <div style={{ textAlign: 'center', marginBottom: '1em' }}>
-                  <b>Battery Efficiency</b>
-                </div>
-                <ChartContainer>
-                  <LineChart key="battery" dataSource={batteryEfficiencyDataSource} />
-                  <RealTimeDomain window={10000} />
-                  <TimeAxis />
-                  <VerticalAxis />
-                </ChartContainer>
-              </Card>
-            </Areas.ChartBattery>
+        {/* Battery Chart */}
+        <div style={{ gridColumn: '2 / 3' }}>
+          <Card>
+            <div style={{ textAlign:'center', marginBottom:8 }}><b>Battery Efficiency</b></div>
+            <ChartContainer>
+              <LineChart key="battery" dataSource={batteryEfficiencyDataSource} />
+              <RealTimeDomain window={10000} />
+              <TimeAxis />
+              <VerticalAxis />
+            </ChartContainer>
+          </Card>
+        </div>
 
-            <Areas.ChartDistance>
-              <Card>
-                <div style={{ textAlign: 'center', marginBottom: '1em' }}>
-                  <b>Ultrasonic Distance (mm)</b>
-                </div>
-                <ChartContainer>
-                  <LineChart key="distance" dataSource={distanceDataSource} />
-                  <RealTimeDomain window={15000} />
-                  <TimeAxis />
-                  <VerticalAxis />
-                </ChartContainer>
-              </Card>
-            </Areas.ChartDistance>
+        {/* Distance Chart */}
+        <div style={{ gridColumn: '3 / 3' }}>
+          <Card>
+            <div style={{ textAlign:'center', marginBottom:8 }}><b>Ultrasonic Distance (mm)</b></div>
+            <ChartContainer>
+              <LineChart key="distance" dataSource={safeDistanceSource} />
+              <RealTimeDomain window={15000} />
+              <TimeAxis />
+              <VerticalAxis />
+            </ChartContainer>
+          </Card>
+        </div>
 
-            <Areas.Slider>
-              <Card>
-                <div style={{ margin: 20 }}>
-                  <div style={{ margin: 10 }}>Transmission Frequency (ms) </div>
-                  <Slider
-                    min={20}
-                    max={120}
-                    stepSize={5}
-                    labelStepSize={5}
-                    sendOnlyOnRelease
-                  >
-                    <Slider.Handle accessor="lit_time" />
-                  </Slider>
-                </div>
-              </Card>
-            </Areas.Slider>
+        {/* Slider */}
+        <div style={{ gridColumn: '1 / 2' }}>
+          <Card>
+            <div style={{ margin:12 }}>
+              <div style={{ marginBottom:8 }}>Transmission Frequency (ms)</div>
+              <Slider min={20} max={120} stepSize={5} labelStepSize={5} sendOnlyOnRelease>
+                <Slider.Handle accessor="lit_time" />
+              </Slider>
+            </div>
+          </Card>
+        </div>
 
-            <Areas.Switch>
-              <Card>
-                <div style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <Button
-                    intent={propulsionOnState ? 'success' : 'primary'}
-                    text={propulsionOnState ? 'TURN RELAY OFF' : 'TURN RELAY ON'}
-                    onClick={handleToggleRelay}
-                    large
-                  />
-                </div>
-              </Card>
-            </Areas.Switch>
+       {/*}
+        <div style={{ gridColumn: '2 / 3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Card style={{ width: '100%', minHeight: '80px', alignSelf: 'center', height: '100%' }}>
+          <div style={{ padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+             <Button large intent={propulsionOnState ? 'success' : 'primary'} text={propulsionOnState ? 'TURN RELAY OFF' : 'TURN RELAY ON'} onClick={handlePropulsionToggle} />
+          </div>
+          </Card>
+        </div>
 
-            <Areas.DistanceStat>
-              <Card>
-                <div style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between' }}>
-                  <div>
-                    <div style={{ fontSize: 12, color: '#666' }}>Last Distance</div>
-                    <div style={{ fontSize: 20 }}>
-                      {lastDistance === null ? '—' : `${lastDistance} mm`}
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            </Areas.DistanceStat>
+        {/* Distance stat 
+        <div style={{ gridColumn: '3 / 3' }}>
+          <Card>
+            <div style={{ padding:12 }}>
+              <div style={{ fontSize:12, color:'#666' }}>Last Distance</div>
+              <div style={{ fontSize:20 }}>{lastDistance === null ? '—' : `${lastDistance} mm`}</div>
+            </div>
+          </Card>
+        </div>*/}
 
-            <Areas.Statistic>
-              <Card>
-                <div style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <Statistic accessor="voltage"
-                    label="Propulsion Voltage"
-                    suffix = "V"
-                    color="#ffab9eff" />
+        {/* Propulsion Voltage (wide) 
+        <div style={{ gridColumn: '1 / 2' }}>
+          <Card>
+            <div style={{ padding:12 }}>
+              <div style={{ fontSize:12, color:'#666' }}>Propulsion Voltage</div>
+              {/* Using Statistic accessor as a display; it will work if 'voltage' is tracked 
+              <div style={{ marginTop:8 }}><Statistic accessor="voltage" label="" suffix="V" /></div>
+            </div>
+          </Card>
+        </div> */} 
+
+                {/* Propulsion Voltage (middle column, with embedded button) */}
+        <div style={{ gridColumn: '2 / 3', gridRow: '2 / 3', display: 'flex' }}>
+          <Card style={{width: '100%', height: '130px', display: 'flex', alignItems: 'stretch', boxSizing: 'border-box'}}>
+            <div style={{ gridColumn: '2 / 3', gridRow: '2 / 3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {/* Left side: Propulsion button */}
+              <div style={{ width: '70%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12, borderRight: '1px solid rgba(255,255,255,0.1)' }}>
+                <Button
+                  large
+                  intent={propulsionOnState ? 'success' : 'primary'}
+                  text={propulsionOnState ? 'TURN RELAY OFF' : 'TURN RELAY ON'}
+                  onClick={handlePropulsionToggle}
+                />
+              </div>
+              {/* Right side: Voltage display */}
+              <div style={{ width: '30%', padding: 16, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                {/*<div style={{ fontSize: 13, fontWeight: 600, color: '#ffffffff', marginBottom: 4 }}>Propulsion Voltage</div> */}
+                <div style={{ fontSize: 40, marginTop: 8 }}>
+                  <Statistic accessor="voltage" label="" suffix="V" formatter={(value: number) => value?.toFixed(2)}/>
                 </div>
-              </Card>
-            </Areas.Statistic>
-          </React.Fragment>
-        )}
-      </Composition>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        
+
+        {/* RSSI Chart + numeric */}
+        <div style={{ gridColumn: '3 / 4' }}>
+          <Card>
+            <div style={{ textAlign:'center', marginBottom:8 }}><b>RSSI (dBm)</b></div>
+            <ChartContainer>
+              <LineChart key="rssi" dataSource={safeRssiSource} />
+              <RealTimeDomain window={15000} />
+              <TimeAxis />
+              <VerticalAxis />
+            </ChartContainer>
+            <div style={{ padding:12, textAlign:'center' }}>
+              <div style={{ fontSize:12, color:'#666' }}>Last RSSI</div>
+              <div style={{ fontSize:20 }}>{lastRssi === null ? '—' : `${lastRssi} dBm`}</div>
+            </div>
+          </Card>
+        </div>
+
+      </div>
     </React.Fragment>
   )
 }
+
+export default OverviewPage
