@@ -141,7 +141,7 @@ export const OverviewPage = (props: RouteComponentProps) => {
   const ledStateDataSource = useMessageDataSource('led_state')
   const batteryEfficiencyDataSource = useMessageDataSource('battery')
   const speedDataSource = useMessageDataSource('speed')
-  const distanceDataSource = useMessageDataSource('ultrasonic')
+  const distanceDataSource = useMessageDataSource('ultra')
   const rssiDataSource = useMessageDataSource('rssi')
 
   const deviceManager = useDeviceManager() as any
@@ -150,8 +150,16 @@ export const OverviewPage = (props: RouteComponentProps) => {
     deviceManager.devices?.[0] ??
     null
 
-  const [propulsionOnState, setPropulsionOnState] = useState<boolean>(false)
+    // DEBUG: expose device to window so we can call write() manually from the console
+    useEffect(() => {
+  // @ts-ignore
+  window._electricui_device = device;
+  console.log('DEBUG: electricui device object:', device);
+}, [device]);
 
+
+  const [propulsionOnState, setPropulsionOnState] = useState<boolean>(false)
+{/* 
   const handlePropulsionToggle = async () => {
     const next = !propulsionOnState
     setPropulsionOnState(next)
@@ -160,12 +168,65 @@ export const OverviewPage = (props: RouteComponentProps) => {
         await device.write({ propulsion: next ? 1 : 0 })
       } catch (err) {
         console.warn('device.write failed', err)
-        setPropulsionOnState(!next)
+        setPropulsionOnState(!next)s
       }
     } else {
       console.warn('No device available to write propulsion state', next)
     }
+  }*/}
+
+  const handlePropulsionToggle = async () => {
+  const next = !propulsionOnState;
+  setPropulsionOnState(next);
+  const propulsionValue = next ? 1 : 0;
+
+  // Preferred path: electricui device.write
+  if (device?.write) {
+    try {
+      await device.write({ propulsion: propulsionValue });
+      console.log('device.write success -> propulsion=', propulsionValue);
+      return;
+    } catch (err) {
+      console.warn('device.write failed', err);
+      setPropulsionOnState(!next);
+      return;
+    }
   }
+
+  // Fallback: Web Serial ASCII command "RELAY ON\n" / "RELAY OFF\n"
+  const asciiCmd = propulsionValue ? 'RELAY ON\n' : 'RELAY OFF\n';
+
+  if (!('serial' in navigator)) {
+    console.warn('No Web Serial API available and no device.write -> cannot send command.');
+    setPropulsionOnState(!next);
+    return;
+  }
+
+  try {
+    // Try to reuse existing granted port; otherwise, request one
+    const webSerial: any = (navigator as any).serial;
+    let ports = await webSerial.getPorts();
+    let port = ports.length ? ports[0] : null;
+
+    if (!port) {
+      // prompt user to pick the port
+      port = await webSerial.requestPort();
+    }
+
+    await port.open({ baudRate: 115200 });
+    const writer = port.writable.getWriter();
+    const enc = new TextEncoder();
+    await writer.write(enc.encode(asciiCmd));
+    await writer.close();
+    await port.close();
+    console.log('Wrote fallback serial command:', asciiCmd.trim());
+  } catch (err) {
+    console.warn('Fallback serial write failed', err);
+    setPropulsionOnState(!next);
+  }
+}
+
+
 
   // Last distance numeric
   const [lastDistance, setLastDistance] = useState<number | null>(null)
@@ -237,7 +298,7 @@ export const OverviewPage = (props: RouteComponentProps) => {
 
   return (
     <React.Fragment>
-      <IntervalRequester interval={50} messageIDs={['led_state','battery','speed','ultrasonic','rssi']} />
+      <IntervalRequester interval={50} messageIDs={['led_state','battery','speed','ultra','rssi']} />
 
       <div style={gridStyle}>
         {/* Speed Chart */}
@@ -266,16 +327,27 @@ export const OverviewPage = (props: RouteComponentProps) => {
           </Card>
         </div>
 
-        {/* Distance Chart */}
+                {/* Distance Chart */}
         <div style={{ gridColumn: '3 / 3' }}>
           <Card>
-            <div style={{ textAlign:'center', marginBottom:8 }}><b>Ultrasonic Distance (mm)</b></div>
+            <div style={{ textAlign: 'center', marginBottom: 8 }}>
+              <b>Ultrasonic Distance (mm)</b>
+            </div>
+
             <ChartContainer>
               <LineChart key="distance" dataSource={safeDistanceSource} />
               <RealTimeDomain window={15000} />
               <TimeAxis />
               <VerticalAxis />
             </ChartContainer>
+
+            {/* Live numeric readout */}
+            <div style={{ padding: 12, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#666' }}>Latest Value</div>
+              <div style={{ fontSize: 24, fontWeight: 600 }}>
+                {lastDistance === null ? '—' : `${lastDistance.toFixed(0)} mm`}
+              </div>
+            </div>
           </Card>
         </div>
 

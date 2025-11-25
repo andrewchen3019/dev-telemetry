@@ -248,6 +248,7 @@ void loop() {
 
   if (serialComplete) {
     String cmd = serialBuf;
+    
     cmd.trim(); cmd.toUpperCase();
     if (cmd == "RELAY ON" || cmd == "RELAYON") {
       // send to bridge directly; change BRIDGE_ID -> BROADCAST_ID if you want broadcast
