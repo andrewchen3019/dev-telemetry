@@ -133,7 +133,7 @@ export const OverviewPage = (props: RouteComponentProps) => {
    const ledStateDataSource = useMessageDataSource('led_state')
   const batteryEfficiencyDataSource = useMessageDataSource('battery')
   const speedDataSource = useMessageDataSource('speed')
-  const distanceDataSource = useMessageDataSource('ultra')
+  const distanceDataSource = useMessageDataSource('distance')
   const rssiDataSource = useMessageDataSource('rssi')
   const propulsionStateDataSource = useMessageDataSource('propulsion_state')
 
@@ -207,7 +207,7 @@ export const OverviewPage = (props: RouteComponentProps) => {
   }, [distanceDataSource, rssiDataSource, safeDistanceSource])
   return (
     <React.Fragment>
-      <IntervalRequester interval={50} messageIDs={['propulsion_state','battery','speed','ultra','rssi']} />
+      <IntervalRequester interval={50} messageIDs={['propulsion_state','battery','speed','distance','rssi']} />
 
       <div style={gridStyle}>
         {/* Speed Chart */}
