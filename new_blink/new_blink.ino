@@ -48,7 +48,7 @@ uint8_t   propulsionState  = 0;   // track if the LED is illuminated
 uint16_t  glow_time  = 200; // in milliseconds
 
 uint32_t  led_timer  = 0;   // track when the light turned on or off
-
+uint16_t  distance = 0; // in millimieters
 // Instantiate the communication interface's management object
 eui_interface_t serial_comms = EUI_INTERFACE( &serial_write ); 
 
@@ -58,6 +58,7 @@ eui_message_t tracked_variables[] =
   EUI_UINT8(  "led_blink",  propulsion ),
   EUI_UINT8(  "propulsionState",  propulsionState ),
   EUI_UINT16( "lit_time",   glow_time ),
+  EUI_UINT16("distance", distance)
 };
 
 void setup() 
@@ -212,6 +213,7 @@ void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
           // If ultrasonic ID, decode 16-bit mm
           if (can_id == 0x0100 && dlc >= 2) {
             uint16_t dist = ((uint16_t)payload[7] << 8) | (uint16_t)payload[8];
+            distance = dist;
             //if (dist == 0xFFFF) Serial.println("Ultrasonic: TIMEOUT (0xFFFF)");
             //else Serial.printf("Ultrasonic: %u mm\n", (unsigned int)dist);
           }
@@ -256,6 +258,7 @@ void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
 
     if (can_id == 0x0100 && dlc >= 2) {
       uint16_t dist = ((uint16_t)payload[3] << 8) | (uint16_t)payload[4];
+      distance = dist;
       //if (dist == 0xFFFF) Serial.println("Ultrasonic: TIMEOUT (0xFFFF)");
       //else Serial.printf("Ultrasonic: %u mm\n", (unsigned int)dist);
     }
