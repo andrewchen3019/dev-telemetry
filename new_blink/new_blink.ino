@@ -4,7 +4,7 @@
 // Simple variables to modify the LED behaviour
 uint8_t   propulsion = 0; // if the blinker should be running
 uint8_t   propulsion_before = 0; // if the blinker should be running
-uint8_t   propulsion_state  = 0;   // track if the LED is illuminated
+uint8_t   propulsionState  = 0;   // track if the LED is illuminated
 uint16_t  glow_time  = 200; // in milliseconds
 
 uint32_t  led_timer  = 0;   // track when the light turned on or off
@@ -16,7 +16,7 @@ eui_interface_t serial_comms = EUI_INTERFACE( &serial_write );
 eui_message_t tracked_variables[] = 
 {
   EUI_UINT8(  "led_blink",  propulsion ),
-  EUI_UINT8(  "propulsion_state",  propulsion_state ),
+  EUI_UINT8(  "propulsionState",  propulsionState ),
   EUI_UINT16( "lit_time",   glow_time ),
 };
 
@@ -44,9 +44,9 @@ void loop()
 
   if( propulsion != propulsion_before ){
     if(propulsion == 1){
-      propulsion_state = 1;
+      propulsionState = 1;
     }else {
-      propulsion_state = 0;
+      propulsionState = 0;
     }
     propulsion_before = propulsion;
   }
@@ -56,10 +56,10 @@ void loop()
   //     {
   //          //invert led state
   //         led_timer = millis();
-  //         eui_send_tracked( "propulsion_state" ); // send the new value to the UI
+  //         eui_send_tracked( "propulsionState" ); // send the new value to the UI
   //     }
   // }
-  digitalWrite( LED_BUILTIN, propulsion_state ); //update the LED to match the intended state
+  digitalWrite( LED_BUILTIN, propulsionState ); //update the LED to match the intended state
 }
 
 void serial_rx_handler()
