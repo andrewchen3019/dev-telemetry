@@ -66,6 +66,7 @@ void setup()
   Serial.begin( 115200 );
   pinMode( LED_BUILTIN, OUTPUT );
 
+  // ------------ LoRA setup
   // Provide the library with the interface we just setup
   eui_setup_interface( &serial_comms );
 
@@ -78,8 +79,8 @@ void setup()
   led_timer = millis();
 
   //=====================================================================================
-  //LoRA SETUP
-  delay(50);
+  //ElectricUI SETUP
+  //delay(50);
   //Serial.println("\nRemote LoRa Sender/Receiver with Relay Control");
 
   Mcu.begin(HELTEC_BOARD, SLOW_CLK_TPYE);
@@ -97,7 +98,6 @@ void setup()
 
   lora_idle = false;
   Radio.Rx(0);
-
   //Serial.println("Ready. Type 'RELAY ON' or 'RELAY OFF' on serial to command the bridge relay.");
   //Serial.printf("This node SRC_ID=0x%02X -> target BRIDGE_ID=0x%02X\n", SRC_ID, BRIDGE_ID);
 
@@ -271,7 +271,7 @@ void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
 // OnRxTimeout
 void OnRxTimeout(void) { Radio.Rx(0); lora_idle = true; }
 
-  //=====================================================================================
+//=====================================================================================
 void loop() 
 {
   Radio.IrqProcess();
