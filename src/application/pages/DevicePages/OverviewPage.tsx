@@ -13,13 +13,10 @@ import {
 import { Card, Button } from '@blueprintjs/core'
 import { IntervalRequester, useDeviceManager } from '@electricui/components-core'
 import { useMessageDataSource } from '@electricui/core-timeseries'
-import { Slider } from '@electricui/components-desktop-blueprint'
+import { Slider, Switch } from '@electricui/components-desktop-blueprint'
 import { Statistic } from '@electricui/components-desktop-blueprint'
 
-/**
- * A simple CSS-grid layout to avoid atomic-layout version/layout quirks.
- * Three columns on wide screens, stacks on narrow screens.
- */
+
 const gridStyle: React.CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(3, 1fr)',
@@ -30,8 +27,6 @@ const gridStyle: React.CSSProperties = {
   padding: '12px',
   gridAutoRows: 'minmax(120px, auto)',
 }
-
-/** Helper to try several common accessors to return the latest numeric value. */
 function getLatestFromDataSource(dataSource: any) {
   if (!dataSource) return undefined
   if (typeof dataSource.getLatest === 'function') {
@@ -53,8 +48,6 @@ function getLatestFromDataSource(dataSource: any) {
   }
   return undefined
 }
-
-/** Defensive wrapper providing the interface charts expect */
 function makeSafeDataSource(original: any) {
   const noop = {
     subscribe: (_cb: any) => () => {},
@@ -136,99 +129,16 @@ function makeSafeDataSource(original: any) {
     },
   }
 }
-
 export const OverviewPage = (props: RouteComponentProps) => {
-  const ledStateDataSource = useMessageDataSource('led_state')
+   const ledStateDataSource = useMessageDataSource('led_state')
   const batteryEfficiencyDataSource = useMessageDataSource('battery')
   const speedDataSource = useMessageDataSource('speed')
   const distanceDataSource = useMessageDataSource('ultra')
   const rssiDataSource = useMessageDataSource('rssi')
-
-  const deviceManager = useDeviceManager() as any
-  const device =
-    deviceManager.connectedDevices?.[0] ??
-    deviceManager.devices?.[0] ??
-    null
-
-    // DEBUG: expose device to window so we can call write() manually from the console
-    useEffect(() => {
-  // @ts-ignore
-  window._electricui_device = device;
-  console.log('DEBUG: electricui device object:', device);
-}, [device]);
+  const propulsionStateDataSource = useMessageDataSource('propulsion_state')
 
 
-  const [propulsionOnState, setPropulsionOnState] = useState<boolean>(false)
-{/* 
-  const handlePropulsionToggle = async () => {
-    const next = !propulsionOnState
-    setPropulsionOnState(next)
-    if (device?.write) {
-      try {
-        await device.write({ propulsion: next ? 1 : 0 })
-      } catch (err) {
-        console.warn('device.write failed', err)
-        setPropulsionOnState(!next)s
-      }
-    } else {
-      console.warn('No device available to write propulsion state', next)
-    }
-  }*/}
-
-  const handlePropulsionToggle = async () => {
-  const next = !propulsionOnState;
-  setPropulsionOnState(next);
-  const propulsionValue = next ? 1 : 0;
-
-  // Preferred path: electricui device.write
-  if (device?.write) {
-    try {
-      await device.write({ propulsion: propulsionValue });
-      console.log('device.write success -> propulsion=', propulsionValue);
-      return;
-    } catch (err) {
-      console.warn('device.write failed', err);
-      setPropulsionOnState(!next);
-      return;
-    }
-  }
-
-  // Fallback: Web Serial ASCII command "RELAY ON\n" / "RELAY OFF\n"
-  const asciiCmd = propulsionValue ? 'RELAY ON\n' : 'RELAY OFF\n';
-
-  if (!('serial' in navigator)) {
-    console.warn('No Web Serial API available and no device.write -> cannot send command.');
-    setPropulsionOnState(!next);
-    return;
-  }
-
-  try {
-    // Try to reuse existing granted port; otherwise, request one
-    const webSerial: any = (navigator as any).serial;
-    let ports = await webSerial.getPorts();
-    let port = ports.length ? ports[0] : null;
-
-    if (!port) {
-      // prompt user to pick the port
-      port = await webSerial.requestPort();
-    }
-
-    await port.open({ baudRate: 115200 });
-    const writer = port.writable.getWriter();
-    const enc = new TextEncoder();
-    await writer.write(enc.encode(asciiCmd));
-    await writer.close();
-    await port.close();
-    console.log('Wrote fallback serial command:', asciiCmd.trim());
-  } catch (err) {
-    console.warn('Fallback serial write failed', err);
-    setPropulsionOnState(!next);
-  }
-}
-
-
-
-  // Last distance numeric
+    // Last distance numeric
   const [lastDistance, setLastDistance] = useState<number | null>(null)
   useEffect(() => {
     if (!distanceDataSource) return
@@ -295,10 +205,9 @@ export const OverviewPage = (props: RouteComponentProps) => {
     // eslint-disable-next-line no-console
     console.log('raw rssiDataSource:', rssiDataSource)
   }, [distanceDataSource, rssiDataSource, safeDistanceSource])
-
   return (
     <React.Fragment>
-      <IntervalRequester interval={50} messageIDs={['led_state','battery','speed','ultra','rssi']} />
+      <IntervalRequester interval={50} messageIDs={['propulsion_state','battery','speed','ultra','rssi']} />
 
       <div style={gridStyle}>
         {/* Speed Chart */}
@@ -362,50 +271,20 @@ export const OverviewPage = (props: RouteComponentProps) => {
             </div>
           </Card>
         </div>
-
-       {/*}
-        <div style={{ gridColumn: '2 / 3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Card style={{ width: '100%', minHeight: '80px', alignSelf: 'center', height: '100%' }}>
-          <div style={{ padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-             <Button large intent={propulsionOnState ? 'success' : 'primary'} text={propulsionOnState ? 'TURN RELAY OFF' : 'TURN RELAY ON'} onClick={handlePropulsionToggle} />
-          </div>
-          </Card>
-        </div>
-
-        {/* Distance stat 
-        <div style={{ gridColumn: '3 / 3' }}>
-          <Card>
-            <div style={{ padding:12 }}>
-              <div style={{ fontSize:12, color:'#666' }}>Last Distance</div>
-              <div style={{ fontSize:20 }}>{lastDistance === null ? '—' : `${lastDistance} mm`}</div>
-            </div>
-          </Card>
-        </div>*/}
-
-        {/* Propulsion Voltage (wide) 
-        <div style={{ gridColumn: '1 / 2' }}>
-          <Card>
-            <div style={{ padding:12 }}>
-              <div style={{ fontSize:12, color:'#666' }}>Propulsion Voltage</div>
-              {/* Using Statistic accessor as a display; it will work if 'voltage' is tracked 
-              <div style={{ marginTop:8 }}><Statistic accessor="voltage" label="" suffix="V" /></div>
-            </div>
-          </Card>
-        </div> */} 
-
-                {/* Propulsion Voltage (middle column, with embedded button) */}
         <div style={{ gridColumn: '2 / 3', gridRow: '2 / 3', display: 'flex' }}>
           <Card style={{width: '100%', height: '130px', display: 'flex', alignItems: 'stretch', boxSizing: 'border-box'}}>
             <div style={{ gridColumn: '2 / 3', gridRow: '2 / 3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {/* Left side: Propulsion button */}
-              <div style={{ width: '70%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12, borderRight: '1px solid rgba(255,255,255,0.1)' }}>
-                <Button
-                  large
-                  intent={propulsionOnState ? 'success' : 'primary'}
-                  text={propulsionOnState ? 'TURN RELAY OFF' : 'TURN RELAY ON'}
-                  onClick={handlePropulsionToggle}
-                />
-              </div>
+              <Switch
+                unchecked={0}
+                checked={1}
+                accessor={state => state.led_blink}
+                writer={(state, value) => {
+                  state.led_blink = value
+                }}
+              >
+                Toggle propulsion 
+              </Switch>
               {/* Right side: Voltage display */}
               <div style={{ width: '30%', padding: 16, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                 {/*<div style={{ fontSize: 13, fontWeight: 600, color: '#ffffffff', marginBottom: 4 }}>Propulsion Voltage</div> */}
@@ -416,10 +295,7 @@ export const OverviewPage = (props: RouteComponentProps) => {
             </div>
           </Card>
         </div>
-
-        
-
-        {/* RSSI Chart + numeric */}
+              {/* RSSI Chart + numeric */}
         <div style={{ gridColumn: '3 / 4' }}>
           <Card>
             <div style={{ textAlign:'center', marginBottom:8 }}><b>RSSI (dBm)</b></div>
@@ -438,7 +314,67 @@ export const OverviewPage = (props: RouteComponentProps) => {
 
       </div>
     </React.Fragment>
-  )
-}
 
-export default OverviewPage
+
+  )
+
+
+  // return (
+  //   <React.Fragment>
+  //     <IntervalRequester interval={50} messageIDs={['propulsion_state']} />
+
+  //     <Composition areas={layoutDescription} gap={10} autoCols="1fr">
+  //       {Areas => (
+  //         <React.Fragment>
+  //           <Areas.Chart>
+  //             <Card>
+  //               <div style={{ textAlign: 'center', marginBottom: '1em' }}>
+  //                 <b>propulsion State</b>
+  //               </div>
+  //               <ChartContainer>
+  //                 <LineChart dataSource={propulsionStateDataSource} />
+  //                 <RealTimeDomain window={10000} />
+  //                 <TimeAxis />
+  //                 <VerticalAxis />
+  //               </ChartContainer>
+  //             </Card>
+  //           </Areas.Chart>
+
+  //           <Areas.Light>
+  //             <LightBulb
+  //               containerStyle={{ margin: '20px auto', width: '80%' }}
+  //               width="40vw"
+  //             />
+  //           </Areas.Light>
+  //           <Areas.Slider>
+  //             <Card>
+  //               <div>
+  //                 propulsion state: <Printer accessor="propulsion_state" />
+  //                 <Switch
+  //               unchecked={0}
+  //               checked={1}
+  //               accessor={state => state.led_blink}
+  //               writer={(state, value) => {
+  //                 state.led_blink = value
+  //               }}
+  //             >
+  //               Toggle propulsion Blinker
+  //             </Switch>
+  //                 <Slider
+  //                   min={20}
+  //                   max={1020}
+  //                   stepSize={10}
+  //                   labelStepSize={100}
+  //                   sendOnlyOnRelease
+  //                 >
+  //                   <Slider.Handle accessor="lit_time" />
+  //                 </Slider>
+  //               </div>
+  //             </Card>
+  //           </Areas.Slider>
+  //         </React.Fragment>
+  //       )}
+  //     </Composition>
+  //   </React.Fragment>
+  // )
+}
