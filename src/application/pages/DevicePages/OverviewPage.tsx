@@ -211,7 +211,7 @@ export const OverviewPage = (props: RouteComponentProps) => {
 
       <div style={gridStyle}>
         {/* Speed Chart */}
-        <div style={{ gridColumn: '1 / 2' }}>
+        <div style={{ gridColumn: '1 / 2', height: '350px' }}>
           <Card>
             <div style={{ textAlign:'center', marginBottom:8 }}><b>Speed</b></div>
             <ChartContainer>
@@ -224,7 +224,7 @@ export const OverviewPage = (props: RouteComponentProps) => {
         </div>
 
         {/* Battery Chart */}
-        <div style={{ gridColumn: '2 / 3' }}>
+        <div style={{ gridColumn: '2 / 3', height: '350px' }}>
           <Card>
             <div style={{ textAlign:'center', marginBottom:8 }}><b>Battery Efficiency</b></div>
             <ChartContainer>
@@ -237,15 +237,15 @@ export const OverviewPage = (props: RouteComponentProps) => {
         </div>
 
                 {/* Distance Chart */}
-        <div style={{ gridColumn: '3 / 3' }}>
+        <div style={{ gridColumn: '3 / 3', height: '350px'}}>
           <Card>
-            <div style={{ textAlign: 'center', marginBottom: 8 }}>
+            <div style={{ textAlign: 'center', marginBottom: 8}}>
               <b>Ultrasonic Distance (mm)</b>
             </div>
 
             <ChartContainer>
-              <LineChart key="distance" dataSource={safeDistanceSource} />
-              <RealTimeDomain window={15000} />
+              <LineChart key="distance" dataSource={distanceDataSource} />
+              <RealTimeDomain window={15000} yMin={0} yMaxSoft={100}/>
               <TimeAxis />
               <VerticalAxis />
             </ChartContainer>
@@ -261,18 +261,18 @@ export const OverviewPage = (props: RouteComponentProps) => {
         </div>
 
         {/* Slider */}
-        <div style={{ gridColumn: '1 / 2' }}>
+        <div style={{ gridColumn: '1 / 2', height: '275px'}}>
           <Card>
-            <div style={{ margin:12 }}>
+            <div style={{ margin:12, height: '275px' }}>
               <div style={{ marginBottom:8 }}>Transmission Frequency (ms)</div>
-              <Slider min={20} max={120} stepSize={5} labelStepSize={5} sendOnlyOnRelease>
+              <Slider min={20} max={250} stepSize={5} labelStepSize={20} sendOnlyOnRelease>
                 <Slider.Handle accessor="lit_time" />
               </Slider>
             </div>
           </Card>
         </div>
-        <div style={{ gridColumn: '2 / 3', gridRow: '2 / 3', display: 'flex' }}>
-          <Card style={{width: '100%', height: '130px', display: 'flex', alignItems: 'stretch', boxSizing: 'border-box'}}>
+        <div style={{ gridColumn: '2 / 3', gridRow: '2 / 3', display: 'flex', height: '275px'  }}>
+          <Card style={{width: '100%', display: 'flex', alignItems: 'stretch', boxSizing: 'border-box'}}>
             <div style={{ gridColumn: '2 / 3', gridRow: '2 / 3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {/* Left side: Propulsion button */}
               <Switch
@@ -289,7 +289,7 @@ export const OverviewPage = (props: RouteComponentProps) => {
               <div style={{ width: '30%', padding: 16, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                 {/*<div style={{ fontSize: 13, fontWeight: 600, color: '#ffffffff', marginBottom: 4 }}>Propulsion Voltage</div> */}
                 <div style={{ fontSize: 40, marginTop: 8 }}>
-                  <Statistic accessor="voltage" label="" suffix="V" formatter={(value: number) => value?.toFixed(2)}/>
+                  {/*<Statistic accessor="voltage" label="" suffix="V" formatter={(value: number) => value?.toFixed(2)}/>*/}
                 </div>
               </div>
             </div>
