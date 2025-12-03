@@ -38,7 +38,7 @@ volatile uint8_t ack_from = 0;
 
 // --- ElectricUI tracked vars ---
 uint8_t propulsion = 0;
-uint8_t propulsion_before = 255;
+uint8_t propulsion_last = 0xFF;
 uint16_t ultrasonic = 0;
 uint16_t battery = 6;
 uint16_t speed = 10;
@@ -201,19 +201,32 @@ void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
 void OnRxTimeout(void) { Radio.Rx(0); lora_idle = true; }
 
 // ---------- ElectricUI glue ----------
+// void eui_serial_callback(uint8_t message) {
+//   if (message == EUI_CB_TRACKED) {
+//     char *id = (char*)serial_comms.packet.id_in;
+//     if (strcmp(id, "propulsion") == 0) {
+//       Serial.printf("ElectricUI propulsion changed -> %u\n", propulsion);
+//       if (propulsion != propulsion_last) {
+//         propulsion_last = propulsion;
+//         sendRelayCommand(BRIDGE_ID, propulsion ? 0x01 : 0x00);
+//       }
+//     }
+//   }
+// }
+
 void eui_serial_callback(uint8_t message) {
-  if (message == EUI_CB_TRACKED) {
-    char *id = (char*)serial_comms.packet.id_in;
-    if (strcmp(id, "propulsion") == 0) {
-      Serial.printf("ElectricUI propulsion changed -> %u\n", propulsion);
-      if (propulsion != propulsion_before) {
-        propulsion_before = propulsion;
-        sendRelayCommand(BRIDGE_ID, propulsion ? 0x01 : 0x00);
+    if (message == EUI_CB_TRACKED) {
+      const char key[] = "propulsion";
+      if (serial_comms.packet.id_in_len == sizeof(key)-1 &&
+      memcmp(serial_comms.packet.id_in, key, sizeof(key)-1) == 0) {
+        Serial.printf("ElectricUI propulsion changed -> %u\n", propulsion);
+        if (propulsion != propulsion_last) {
+          propulsion_last = propulsion;
+          sendRelayCommand(BRIDGE_ID, propulsion ? 0x01 : 0x00);
+        }
       }
     }
-  }
 }
-
 void serial_rx_handler() {
   while (Serial.available() > 0) {
     eui_parse(Serial.read(), &serial_comms);
@@ -265,6 +278,13 @@ void loop() {
   serial_rx_handler();
 
   // CLI handling
+
+  // if (propulsion != propulsion_last) {
+  //   sendRelayCommand(BRIDGE_ID, propulsion ? 0x01 : 0x00);
+  //   propulsion_last = propulsion;
+  //   Serial.printf("ahhhhhh")
+  // }
+
   while (Serial.available()) {
     char c = (char)Serial.read();
     if (c == '\r') continue;

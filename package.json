@@ -31,10 +31,6 @@
     "dmg-builder": {
       "unplugged": true
     },
-
-
-
-    
     "electron": {
       "unplugged": true
     },
@@ -192,7 +188,6 @@
     "three": "0.174.0",
     "three-stdlib": "2.35.14",
     "upath": "^1.2.0"
-
   },
   "scripts": {
     "build": "electricui-build-tools app && electron-builder",
@@ -204,4 +199,5 @@
   "templateName": "electron",
   "templateVersion": "35.0.1",
   "userID": "tWE2qT1nz/ES6xHl8vmhBg7V8/UP+UvExsJ8uCgCeYw=",
-  "version": "0.1.0"}
+  "version": "0.1.0"
+}
