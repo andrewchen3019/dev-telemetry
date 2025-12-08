@@ -25,7 +25,7 @@ const gridStyle: React.CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
   padding: '12px',
-  gridAutoRows: 'minmax(120px, auto)',
+  gridAutoRows: 'minmax(120px, auto)'
 }
 function getLatestFromDataSource(dataSource: any) {
   if (!dataSource) return undefined
@@ -133,7 +133,7 @@ export const OverviewPage = (props: RouteComponentProps) => {
    const ledStateDataSource = useMessageDataSource('led_state')
   const batteryEfficiencyDataSource = useMessageDataSource('battery')
   const speedDataSource = useMessageDataSource('speed')
-  const distanceDataSource = useMessageDataSource('distance')
+  const distanceDataSource = useMessageDataSource('distance_lo')
   const rssiDataSource = useMessageDataSource('rssi')
   const propulsionStateDataSource = useMessageDataSource('propulsion_state')
 
@@ -205,16 +205,35 @@ export const OverviewPage = (props: RouteComponentProps) => {
     // eslint-disable-next-line no-console
     console.log('raw rssiDataSource:', rssiDataSource)
   }, [distanceDataSource, rssiDataSource, safeDistanceSource])
+
+  // helper card style for consistency
+  const cardFullStyle: React.CSSProperties = {
+    height: '100%',
+    // display: 'flex',
+    flexDirection: 'column',
+    boxSizing: 'border-box',
+    textAlign: 'center'
+  }
+  const switchStyle: React.CSSProperties = {
+    height: '100px'
+  }
+
+  // helper wrapper for grid children so gridAutoRows applies and each child stretches
+  const cellStyle: React.CSSProperties = {
+    // height: '100%',
+    // display: 'flex',
+  }
+
   return (
     <React.Fragment>
-      <IntervalRequester interval={50} messageIDs={['propulsion_state','battery','speed','distance','rssi']} />
+      <IntervalRequester interval={50} messageIDs={['propulsion_state','battery','speed','distance_lo','rssi']} />
 
       <div style={gridStyle}>
         {/* Speed Chart */}
-        <div style={{ gridColumn: '1 / 2', height: '350px' }}>
-          <Card>
-            <div style={{ textAlign:'center', marginBottom:8 }}><b>Speed</b></div>
-            <ChartContainer>
+        <div style={cellStyle}>
+          <Card style={cardFullStyle}>
+            <div style={{ padding: 12 }}><b>Speed</b></div>
+            <ChartContainer style={{ flex: 1, minHeight: 0 }}>
               <LineChart key="speed" dataSource={speedDataSource} />
               <RealTimeDomain window={10000} />
               <TimeAxis />
@@ -224,10 +243,10 @@ export const OverviewPage = (props: RouteComponentProps) => {
         </div>
 
         {/* Battery Chart */}
-        <div style={{ gridColumn: '2 / 3', height: '350px' }}>
-          <Card>
-            <div style={{ textAlign:'center', marginBottom:8 }}><b>Battery Efficiency</b></div>
-            <ChartContainer>
+        <div style={cellStyle}>
+          <Card style={cardFullStyle}>
+            <div className="title" style={{ padding: 12 }}><b>Battery Efficiency</b></div>
+            <ChartContainer style={{ flex: 1, minHeight: 0 }}>
               <LineChart key="battery" dataSource={batteryEfficiencyDataSource} />
               <RealTimeDomain window={10000} />
               <TimeAxis />
@@ -236,14 +255,12 @@ export const OverviewPage = (props: RouteComponentProps) => {
           </Card>
         </div>
 
-                {/* Distance Chart */}
-        <div style={{ gridColumn: '3 / 3', height: '350px'}}>
-          <Card>
-            <div style={{ textAlign: 'center', marginBottom: 8}}>
-              <b>Ultrasonic Distance (mm)</b>
-            </div>
+        {/* Distance Chart */}
+        <div style={cellStyle}>
+          <Card style={cardFullStyle}>
+            <div style={{ padding: 12 }}><b>Ultrasonic Distance (mm)</b></div>
 
-            <ChartContainer>
+            <ChartContainer style={{ flex: 1, minHeight: 0 }}>
               <LineChart key="distance" dataSource={distanceDataSource} />
               <RealTimeDomain window={15000} yMin={0} yMaxSoft={100}/>
               <TimeAxis />
@@ -261,45 +278,59 @@ export const OverviewPage = (props: RouteComponentProps) => {
         </div>
 
         {/* Slider */}
-        <div style={{ gridColumn: '1 / 2', height: '275px'}}>
-          <Card>
-            <div style={{ margin:12, height: '275px' }}>
+        <div style={cellStyle}>
+          <Card style={cardFullStyle}>
+            <div style={{ margin:12 }}>
               <div style={{ marginBottom:8 }}>Transmission Frequency (ms)</div>
-              <Slider min={20} max={250} stepSize={5} labelStepSize={20} sendOnlyOnRelease>
-                <Slider.Handle accessor="lit_time" />
-              </Slider>
-            </div>
-          </Card>
-        </div>
-        <div style={{ gridColumn: '2 / 3', gridRow: '2 / 3', display: 'flex', height: '275px'  }}>
-          <Card style={{width: '100%', display: 'flex', alignItems: 'stretch', boxSizing: 'border-box'}}>
-            <div style={{ gridColumn: '2 / 3', gridRow: '2 / 3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {/* Left side: Propulsion button */}
-              <Switch
-                unchecked={0}
-                checked={1}
-                accessor={state => state.led_blink}
-                writer={(state, value) => {
-                  state.led_blink = value
-                }}
-              >
-                Toggle propulsion 
-              </Switch>
-              {/* Right side: Voltage display */}
-              <div style={{ width: '30%', padding: 16, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                {/*<div style={{ fontSize: 13, fontWeight: 600, color: '#ffffffff', marginBottom: 4 }}>Propulsion Voltage</div> */}
-                <div style={{ fontSize: 40, marginTop: 8 }}>
-                  {/*<Statistic accessor="voltage" label="" suffix="V" formatter={(value: number) => value?.toFixed(2)}/>*/}
-                </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <Slider min={20} max={250} stepSize={5} labelStepSize={20} sendOnlyOnRelease>
+                  <Slider.Handle accessor="lit_time" />
+                </Slider>
               </div>
             </div>
           </Card>
         </div>
-              {/* RSSI Chart + numeric */}
-        <div style={{ gridColumn: '3 / 4' }}>
-          <Card>
-            <div style={{ textAlign:'center', marginBottom:8 }}><b>RSSI (dBm)</b></div>
-            <ChartContainer>
+
+        {/* Propulsion + Voltage */}
+        <div style={cellStyle}>
+          <Card style={cardFullStyle}>
+            <div>
+              <div >
+                <Switch
+                  unchecked={0}
+                  checked={1}
+                  accessor={state => state.led_blink}
+                  writer={(state, value) => {
+                    state.led_blink = value
+                  }}
+                  style={switchStyle}
+                >
+                  Toggle propulsion
+                </Switch>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#666', margin: 20 }}>Propulsion Voltage</div>
+                <div style={{ fontSize: 24 }}>
+                  {/* Uncomment and use Statistic when you want to show live voltage */}
+                  {/* <Statistic accessor="voltage" label="" suffix="V" formatter={(value: number) => value?.toFixed(2)}/> */}
+                  — V
+                </div>
+              </div>
+            </div>
+
+            {/* optional bottom filler so card content looks balanced */}
+            <div style={{ padding: 12, marginTop: 'auto' }}>
+              {/* any extra info */}
+            </div>
+          </Card>
+        </div>
+
+        {/* RSSI Chart + numeric */}
+        <div style={cellStyle}>
+          <Card style={cardFullStyle}>
+            <div style={{ textAlign:'center', marginBottom:8, paddingTop: 12 }}><b>RSSI (dBm)</b></div>
+            <ChartContainer style={{ flex: 1, minHeight: 0 }}>
               <LineChart key="rssi" dataSource={safeRssiSource} />
               <RealTimeDomain window={15000} />
               <TimeAxis />
@@ -314,8 +345,6 @@ export const OverviewPage = (props: RouteComponentProps) => {
 
       </div>
     </React.Fragment>
-
-
   )
 
 

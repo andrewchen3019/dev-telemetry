@@ -1,6 +1,7 @@
-
-//=====================================================================================
-//DECLARATION AND IMPORTS OF PROPULSION
+// loRa_ui_receiver_compat_16bit_ui.ino
+// Receives LoRa packets (wrapped CAN or simple forwarded CAN) and exposes variables to ElectricUI.
+// Keeps internal distance as 32-bit, but exposes two 16-bit fields for compatibility with ElectricUI versions
+// that lack EUI_UINT32.
 
 #include <Arduino.h>
 #include "heltec.h"
@@ -35,10 +36,11 @@ void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr);
 void OnRxTimeout(void);
 void sendRelayCommand(uint8_t dst, uint8_t on_off);
 uint8_t computeXor(const uint8_t *buf, uint16_t len);
+uint32_t decodeDistanceFromBytes(const uint8_t *data, uint8_t dlc);
 
 //=====================================================================================
 
-//Import the ElectricUI Library
+// Import the ElectricUI Library
 #include "electricui.h"
 
 // Simple variables to modify the LED behaviour
@@ -48,17 +50,26 @@ uint8_t   propulsionState  = 0;   // track if the LED is illuminated
 uint16_t  glow_time  = 200; // in milliseconds
 
 uint32_t  led_timer  = 0;   // track when the light turned on or off
-uint16_t  distance = 0; // in millimieters
+
+// Keep a full 32-bit distance internally:
+uint32_t distance = 0; // in millimeters (full 32-bit)
+
+// For UI compatibility, expose distance as two uint16 fields:
+uint16_t distance_hi = 0; // upper 16 bits of distance
+uint16_t distance_lo = 0; // lower 16 bits of distance
+
 // Instantiate the communication interface's management object
 eui_interface_t serial_comms = EUI_INTERFACE( &serial_write ); 
 
 // Electric UI manages variables referenced in this array
+// Use two 16-bit fields since EUI_UINT32 may not be defined in your library
 eui_message_t tracked_variables[] = 
 {
   EUI_UINT8(  "led_blink",  propulsion ),
   EUI_UINT8(  "propulsionState",  propulsionState ),
   EUI_UINT16( "lit_time",   glow_time ),
-  EUI_UINT16("distance", distance)
+  EUI_UINT16( "distance_hi", distance_hi ),
+  EUI_UINT16( "distance_lo", distance_lo )
 };
 
 void setup() 
@@ -67,7 +78,7 @@ void setup()
   Serial.begin( 115200 );
   pinMode( LED_BUILTIN, OUTPUT );
 
-  // ------------ LoRA setup
+  // ------------ LoRA & ElectricUI setup
   // Provide the library with the interface we just setup
   eui_setup_interface( &serial_comms );
 
@@ -78,11 +89,6 @@ void setup()
   eui_setup_identifier( "hello", 5 );
 
   led_timer = millis();
-
-  //=====================================================================================
-  //ElectricUI SETUP
-  //delay(50);
-  //Serial.println("\nRemote LoRa Sender/Receiver with Relay Control");
 
   Mcu.begin(HELTEC_BOARD, SLOW_CLK_TPYE);
 
@@ -99,19 +105,15 @@ void setup()
 
   lora_idle = false;
   Radio.Rx(0);
-  //Serial.println("Ready. Type 'RELAY ON' or 'RELAY OFF' on serial to command the bridge relay.");
-  //Serial.printf("This node SRC_ID=0x%02X -> target BRIDGE_ID=0x%02X\n", SRC_ID, BRIDGE_ID);
-
-  //=====================================================================================
-
 }
+
 // ---------- helpers ----------
-  //=====================================================================================
 uint8_t computeXor(const uint8_t *buf, uint16_t len) {
   uint8_t chk = 0;
   for (uint16_t i = 0; i < len; ++i) chk ^= buf[i];
   return chk;
 }
+
 void sendRelayCommand(uint8_t dst, uint8_t on_off) {
   uint8_t pkt[6];
   uint8_t idx = 0;
@@ -124,8 +126,6 @@ void sendRelayCommand(uint8_t dst, uint8_t on_off) {
   uint8_t chk = computeXor(pkt, idx);
   pkt[idx++] = chk;
 
-  //Serial.printf("Sending CMD_RELAY to DST=0x%02X payload=0x%02X chk=0x%02X\n", dst, on_off, chk);
-  // send
   Radio.Sleep(); delay(5);
   lora_idle = false;
   Radio.Send(pkt, idx);
@@ -134,37 +134,56 @@ void sendRelayCommand(uint8_t dst, uint8_t on_off) {
   ack_received = false;
   ack_from = 0;
 }
+
+// Decode distance from a data buffer (big-endian).
+// - If dlc >= 4: interpret as 32-bit big-endian; 0xFFFFFFFF => TIMEOUT
+// - Else if dlc >= 2: interpret as 16-bit big-endian; 0xFFFF => TIMEOUT
+// - Else: return 0
+uint32_t decodeDistanceFromBytes(const uint8_t *data, uint8_t dlc) {
+  if (dlc >= 4) {
+    uint32_t v = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) | ((uint32_t)data[2] << 8) | (uint32_t)data[3];
+    return v;
+  } else if (dlc >= 2) {
+    uint16_t v16 = ((uint16_t)data[0] << 8) | (uint16_t)data[1];
+    return (uint32_t)v16;
+  } else {
+    return 0;
+  }
+}
+
+static inline void publishDistanceToUI(uint32_t dist) {
+  // store full internal value
+  distance = dist;
+  // split for UI fields
+  distance_lo = (uint16_t)(dist & 0xFFFF);
+  distance_hi = (uint16_t)((dist >> 16) & 0xFFFF);
+
+  // send both tracked fields so UI updates
+  eui_send_tracked("distance_lo");
+  eui_send_tracked("distance_hi");
+}
+
 // ---------- Radio callbacks ----------
 void OnTxDone(void) {
-  //Serial.println("LoRa TX done -> back to RX");
   Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
 }
 
 void OnTxTimeout(void) {
-  //Serial.println("LoRa TX timeout");
   Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
 }
 
 // OnRxDone: handle wrapped CAN forwarded frames, simple forwarded CAN, binary ACKs, and binary relay responses
 void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
-  //Serial.printf("\nLoRa RX %u bytes, RSSI=%d, SNR=%d\n", size, rssi, snr);
-
   if (size < 2) {
-    //Serial.printf("RX too small (%u)\n", size);
     Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
     return;
   }
-
-  //Serial.print("Raw bytes:");
-  //for (uint16_t i = 0; i < size; ++i) Serial.printf(" 0x%02X", payload[i]);
-  //Serial.println();
 
   // verify XOR checksum (last byte) if size >= 2
   if (size >= 2) {
     uint8_t chk_calc = 0;
     for (uint16_t i = 0; i < size - 1; ++i) chk_calc ^= payload[i];
     if (chk_calc != payload[size - 1]) {
-     // Serial.printf("Checksum mismatch (calc=0x%02X pkt=0x%02X) -> drop\n", chk_calc, payload[size-1]);
       Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
       return;
     }
@@ -179,7 +198,6 @@ void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
 
     // If the size matches header + len_field + checksum, it's likely the wrapped/binary message
     if ((uint16_t)(len_field + 5) == size) {
-      //Serial.printf("Binary-CMD packet: SRC=0x%02X DST=0x%02X CMD=0x%02X LEN=%u\n", src, dst, cmd, len_field);
 
       // ACK handling
       if (cmd == CMD_ACK) {
@@ -187,9 +205,6 @@ void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
         if (dst == SRC_ID) {
           ack_from = src;
           ack_received = true;
-          //Serial.printf("ACK received from 0x%02X\n", src);
-        } else {
-          //Serial.printf("ACK for someone else (dst=0x%02X)\n", dst);
         }
         Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
         return;
@@ -205,17 +220,27 @@ void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
           uint8_t avail = len_field - 3;
           if (dlc > avail) dlc = avail;
 
-         //Serial.printf("Wrapped CAN packet: CAN_ID=0x%03X DLC=%u\n", can_id, dlc);
+          //Serial.printf("Wrapped CAN packet: CAN_ID=0x%03X DLC=%u\n", can_id, dlc);
           //Serial.print("Wrapped CAN data:");
           //for (uint8_t i = 0; i < dlc; ++i) Serial.printf(" 0x%02X", payload[7 + i]);
           //Serial.println();
 
-          // If ultrasonic ID, decode 16-bit mm
+          // If ultrasonic ID, decode distance supporting 32-bit and 16-bit
           if (can_id == 0x0100 && dlc >= 2) {
-            uint16_t dist = ((uint16_t)payload[7] << 8) | (uint16_t)payload[8];
-            distance = dist;
-            //if (dist == 0xFFFF) Serial.println("Ultrasonic: TIMEOUT (0xFFFF)");
-            //else Serial.printf("Ultrasonic: %u mm\n", (unsigned int)dist);
+            uint32_t dist = decodeDistanceFromBytes(&payload[7], dlc);
+            if (dlc >= 4) {
+              if (dist == 0xFFFFFFFFUL){}//Serial.println("Ultrasonic (wrapped): TIMEOUT (0xFFFFFFFF)");
+              else {
+                //Serial.printf("Ultrasonic (wrapped): %lu mm (32-bit)\n", (unsigned long)dist);
+                publishDistanceToUI(dist);
+              }
+            } else { // 2-byte fallback
+              if (dist == 0xFFFF) {}//Serial.println("Ultrasonic (wrapped): TIMEOUT (0xFFFF)");
+              else {
+                //Serial.printf("Ultrasonic (wrapped): %u mm (16-bit)\n", (unsigned int)dist);
+                publishDistanceToUI(dist);
+              }
+            }
           }
         } else {
           //Serial.println("CMD_CAN_FORWARD payload too short");
@@ -224,17 +249,12 @@ void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
         return;
       }
 
-      // CMD_RELAY might be delivered to other nodes — remote doesn't act on it, just possibly print
+      // CMD_RELAY might be delivered to other nodes — remote doesn't act on it here
       if (cmd == CMD_RELAY) {
-        //Serial.print("CMD_RELAY (binary) payload:");
-        //for (uint8_t i = 0; i < len_field; ++i) Serial.printf(" 0x%02X", payload[4 + i]);
-        //Serial.println();
         Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
         return;
       }
 
-      // Unknown binary cmd
-      //Serial.printf("Binary packet CMD=0x%02X not handled\n", cmd);
       Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
       return;
     }
@@ -251,27 +271,30 @@ void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
     uint8_t possible_dlc = size - 4;
     if (dlc > possible_dlc) dlc = possible_dlc;
 
-    //Serial.printf("Simple forwarded CAN: CAN_ID=0x%03X DLC=%u\n", can_id, dlc);
-    //Serial.print("CAN data:");
-    //for (uint8_t i = 0; i < dlc; ++i) Serial.printf(" 0x%02X", payload[3 + i]);
-    //Serial.println();
-
     if (can_id == 0x0100 && dlc >= 2) {
-      uint16_t dist = ((uint16_t)payload[3] << 8) | (uint16_t)payload[4];
-      distance = dist;
-      //if (dist == 0xFFFF) Serial.println("Ultrasonic: TIMEOUT (0xFFFF)");
-      //else Serial.printf("Ultrasonic: %u mm\n", (unsigned int)dist);
+      uint32_t dist = decodeDistanceFromBytes(&payload[3], dlc);
+      if (dlc >= 4) {
+        if (dist == 0xFFFFFFFFUL) {}//Serial.println("Ultrasonic: TIMEOUT (0xFFFFFFFF)");
+        else {
+          //Serial.printf("Ultrasonic: %lu mm (32-bit)\n", (unsigned long)dist);
+          publishDistanceToUI(dist);
+        }
+      } else {
+        if (dist == 0xFFFF) {}//Serial.println("Ultrasonic: TIMEOUT (0xFFFF)");
+        else {
+          //Serial.printf("Ultrasonic: %u mm (16-bit)\n", (unsigned int)dist);
+          publishDistanceToUI(dist);
+        }
+      }
     }
 
     Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
     return;
   }
 
-  //Serial.println("Unknown packet format");
   Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
 }
 
-// OnRxTimeout
 void OnRxTimeout(void) { Radio.Rx(0); lora_idle = true; }
 
 //=====================================================================================
@@ -285,58 +308,24 @@ void loop()
     if(propulsion == 1){
       sendRelayCommand(BRIDGE_ID, 0x01);
       propulsionState = 1;
-    }else {
+    } else {
       sendRelayCommand(BRIDGE_ID, 0x00);
       propulsionState = 0;
     }
     propulsion_before = propulsion;
   }
 
-  // Serial input collection
-  // while (Serial.available()) {
-  //   char c = (char)Serial.read();
-  //   if (c == '\r') continue;
-  //   if (c == '\n') { serialComplete = true; break; }
-  //   serialBuf += c;
-  //   if (serialBuf.length() > 80) serialBuf.remove(0, serialBuf.length() - 80);
-  // }
-
-  // if (serialComplete) {
-  //   String cmd = serialBuf;
-  //   cmd.trim(); cmd.toUpperCase();
-  //   if (cmd == "RELAY ON" || cmd == "RELAYON") {
-  //     // send to bridge directly; change BRIDGE_ID -> BROADCAST_ID if you want broadcast
-  //     sendRelayCommand(BRIDGE_ID, 0x01);
-  //   } else if (cmd == "RELAY OFF" || cmd == "RELAYOFF") {
-  //     sendRelayCommand(BRIDGE_ID, 0x00);
-  //   } else {
-  //     Serial.printf("Unknown command: %s\n", cmd.c_str());
-  //   }
-  //   serialBuf = "";
-  //   serialComplete = false;
-  // }
-
-  // optional: if we recently sent a command, wait a bit and show if ACK arrived
   static unsigned long lastCheck = 0;
   unsigned long now = millis();
   if ((now - lastCheck) > 300) {
     if (ack_received) {
-      //Serial.printf("ACK confirmed from 0x%02X\n", ack_from);
       ack_received = false;
     }
     lastCheck = now;
   }
 
   delay(10);
-  // {
-  //   // Check if the LED has been on for the configured duration
-  //     if( millis() - led_timer >= glow_time )
-  //     {
-  //          //invert led state
-  //         led_timer = millis();
-  //         eui_send_tracked( "propulsionState" ); // send the new value to the UI
-  //     }
-  // }
+
   digitalWrite( LED_BUILTIN, propulsionState ); //update the LED to match the intended state
 }
 
