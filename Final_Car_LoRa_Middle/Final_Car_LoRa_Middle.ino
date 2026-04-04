@@ -1,7 +1,7 @@
-// can_to_heltec_lora_bridge_simplified.ino
+// can_to_heltec_lora_bridge_decodes_32bit.ino
 // Simplified CAN -> LoRa bridge. Forwards CAN frames as binary packets.
 // Listens for LoRa CMD_RELAY commands only and toggles an attached relay.
-// Assumes relay commands will arrive via LoRa (not on CAN).
+// Updated to decode 32-bit distance values (and fallback to 16-bit).
 
 #include <Arduino.h>
 #include "driver/twai.h"
@@ -39,12 +39,13 @@ void printCANFrame(const twai_message_t &rx);
 void radioForwardCAN_asBinary(const twai_message_t &rx);
 void handleRelayCommandFromPayload(uint8_t src, uint8_t dst, uint8_t *payload, uint8_t len);
 void sendAck(uint8_t to_src);
+uint32_t decodeDistanceFromBytes(const uint8_t *data, uint8_t dlc);
 
 // ---------- Setup ----------
 void setup() {
   Serial.begin(115200);
   delay(50);
-  Serial.println("\nSimplified CAN->LoRa bridge starting...");
+  Serial.println("\nSimplified CAN->LoRa bridge starting (32-bit distance aware)...");
 
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW); // default OFF
@@ -98,17 +99,42 @@ bool init_heltec_radio() {
 }
 
 // ---------- Utilities ----------
+
+/*
+  Decode distance from a data buffer (big-endian).
+  - If dlc >= 4: interpret as 32-bit big-endian; 0xFFFFFFFF => TIMEOUT
+  - Else if dlc >= 2: interpret as 16-bit big-endian; 0xFFFF => TIMEOUT
+  - Else: return 0 and indicate 'not enough data'
+*/
+uint32_t decodeDistanceFromBytes(const uint8_t *data, uint8_t dlc) {
+  if (dlc >= 4) {
+    uint32_t v = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) | ((uint32_t)data[2] << 8) | (uint32_t)data[3];
+    return v;
+  } else if (dlc >= 2) {
+    uint16_t v16 = ((uint16_t)data[0] << 8) | (uint16_t)data[1];
+    return (uint32_t)v16;
+  } else {
+    return 0; // not enough data to decode
+  }
+}
+
 void printCANFrame(const twai_message_t &rx) {
   unsigned long ts = millis();
   Serial.printf("[%10lu ms] CAN RX -> ID: 0x%03X | DLC: %d | Data:", ts, rx.identifier, rx.data_length_code);
   for (int i = 0; i < rx.data_length_code; i++) Serial.printf(" %3u(0x%02X)", rx.data[i], rx.data[i]);
   Serial.println();
 
-  // decode common ultrasonic frame (ID 0x0100, DLC>=2)
+  // decode common ultrasonic frame (ID 0x0100) supporting 4- or 2-byte distances
   if (rx.identifier == 0x0100 && rx.data_length_code >= 2) {
-    uint16_t dist = ((uint16_t)rx.data[0] << 8) | (uint16_t)rx.data[1];
-    if (dist == 0xFFFF) Serial.println("Decoded distance: TIMEOUT (0xFFFF)");
-    else Serial.printf("Decoded distance (from CAN): %u mm\n", (unsigned int)dist);
+    if (rx.data_length_code >= 4) {
+      uint32_t dist32 = decodeDistanceFromBytes(rx.data, rx.data_length_code);
+      if (dist32 == 0xFFFFFFFFUL) Serial.println("Decoded distance: TIMEOUT (0xFFFFFFFF)");
+      else Serial.printf("Decoded distance (from CAN): %lu mm (32-bit)\n", (unsigned long)dist32);
+    } else { // exactly 2 bytes (or >=2 but <4)
+      uint32_t dist16 = decodeDistanceFromBytes(rx.data, rx.data_length_code);
+      if (dist16 == 0xFFFF) Serial.println("Decoded distance: TIMEOUT (0xFFFF)");
+      else Serial.printf("Decoded distance (from CAN): %u mm (16-bit)\n", (unsigned int)dist16);
+    }
   }
 }
 
@@ -262,12 +288,32 @@ void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
       uint8_t dlc = payload[6];
       Serial.printf("Received wrapped CAN ID=0x%03X DLC=%u\n", id, dlc);
       Serial.print("Wrapped CAN data:");
+      // Print wrapped CAN bytes (ensure we don't step past checksum)
       for (uint8_t i = 0; i < dlc && (7 + i) < size - 1; ++i) Serial.printf(" 0x%02X", payload[7 + i]);
       Serial.println();
-      if (id == 0x0100 && dlc >= 2) {
-        uint16_t dist = ((uint16_t)payload[7] << 8) | (uint16_t)payload[8];
-        if (dist == 0xFFFF) Serial.println("Decoded distance (wrapped): TIMEOUT (0xFFFF)");
-        else Serial.printf("Decoded distance (wrapped): %u mm\n", (unsigned int)dist);
+
+      // compute how many data bytes actually arrived (protect against truncated packets)
+      uint8_t available = 0;
+      if (size > 8) { // minimal header + at least one data
+        // size includes header and checksum; data starts at index 7, checksum at size-1
+        if (size > 8) {
+          // available bytes = (size - 1) - 7  => size - 8
+          available = (uint8_t)(size - 8);
+        }
+      }
+      // clamp to claimed dlc
+      if (available > dlc) available = dlc;
+
+      // decode distance if ID indicates ultrasonic sensor
+      if (id == 0x0100 && available >= 2) {
+        uint32_t dist = decodeDistanceFromBytes(&payload[7], available);
+        if (available >= 4) {
+          if (dist == 0xFFFFFFFFUL) Serial.println("Decoded distance (wrapped): TIMEOUT (0xFFFFFFFF)");
+          else Serial.printf("Decoded distance (wrapped): %lu mm (32-bit)\n", (unsigned long)dist);
+        } else { // 2-byte fallback
+          if (dist == 0xFFFF) Serial.println("Decoded distance (wrapped): TIMEOUT (0xFFFF)");
+          else Serial.printf("Decoded distance (wrapped): %u mm (16-bit)\n", (unsigned int)dist);
+        }
       }
     } else {
       Serial.println("CMD_CAN_FORWARD payload too short");

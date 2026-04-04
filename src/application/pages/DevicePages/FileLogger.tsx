@@ -6,10 +6,11 @@ import { useMessageDataSource } from '@electricui/core-timeseries'
 
 
 export const FileLogger = (props: RouteComponentProps) => {
- const batteryEfficiencyDataSource = useMessageDataSource('battery'); //vehicle efficiency 
-  const speedDataSource = useMessageDataSource('speed'); //vehicle speed
-  const distanceDataSource = useMessageDataSource('distance'); //vehicle speed
-
+  const batteryEfficiencyDataSource = useMessageDataSource('battery')
+  const speedDataSource = useMessageDataSource('speed')
+  const distanceDataSource = useMessageDataSource('distance')
+  const rssiDataSource = useMessageDataSource('rssi')
+  const propulsionStateDataSource = useMessageDataSource('propulsion_state')
   return (
     <React.Fragment>
       <PolledCSVLogger
@@ -18,6 +19,8 @@ export const FileLogger = (props: RouteComponentProps) => {
           { dataSource: batteryEfficiencyDataSource, column: 'Battery Efficiency' },
          { dataSource: speedDataSource, column: 'Speed' },
          { dataSource: distanceDataSource, column: 'Distance' },
+            { dataSource:rssiDataSource, column: 'Rssi' },
+         { dataSource:propulsionStateDataSource, column: 'Propulsion' },
         ]}
       />
     </React.Fragment>
