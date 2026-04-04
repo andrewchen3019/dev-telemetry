@@ -9,6 +9,7 @@ export const FileLogger = (props: RouteComponentProps) => {
  const batteryEfficiencyDataSource = useMessageDataSource('battery'); //vehicle efficiency 
   const speedDataSource = useMessageDataSource('speed'); //vehicle speed
   const distanceDataSource = useMessageDataSource('distance'); //vehicle speed
+
   return (
     <React.Fragment>
       <PolledCSVLogger

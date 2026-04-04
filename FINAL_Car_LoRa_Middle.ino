@@ -60,7 +60,7 @@ void setup() {
 void init_can() {
   Serial.printf("TWAI init -> TX pin: %d, RX pin: %d\n", CAN_TX_PIN, CAN_RX_PIN);
   twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
-  twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS();
+  twai_timing_config_t t_config = TWAI_TIMING_CONFIG250KBITS(); //changed from 500
   twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 
   esp_err_t r = twai_driver_install(&g_config, &t_config, &f_config);
@@ -185,6 +185,20 @@ void sendAck(uint8_t to_src) {
   Serial.printf("Sent ACK to 0x%02X\n", to_src);
 }
 
+void decodeTeensyCAN(const twai_message_t &rx)
+{
+  // Teensy sends: standard ID 0x200, DLC=3, ASCII "DEV"
+  if (!rx.extd && rx.identifier == 0x200 && rx.data_length_code == 3)
+  {
+    char msg[4];
+    memcpy(msg, rx.data, 3);
+    msg[3] = '\0';
+
+    Serial.print("Decoded Teensy ASCII: ");
+    Serial.println(msg);
+  }
+}
+
 // ---------- Main loop ----------
 void loop() {
   Radio.IrqProcess();
@@ -194,7 +208,9 @@ void loop() {
   esp_err_t r = twai_receive(&rx, TWAI_RX_TIMEOUT_TICKS);
   if (r == ESP_OK) {
     printCANFrame(rx);
+    decodeTeensyCAN(rx); //just added 3/4
     radioForwardCAN_asBinary(rx);
+
   } else if (r == ESP_ERR_TIMEOUT) {
     // idle - no frame
   } else {
