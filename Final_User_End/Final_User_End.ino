@@ -44,12 +44,12 @@ uint32_t decodeDistanceFromBytes(const uint8_t *data, uint8_t dlc);
 #include "electricui.h"
 
 // Simple variables to modify the LED behaviour
-uint8_t   propulsion = 0; // if the blinker should be running
-uint8_t   propulsion_before = 0; // if the blinker should be running
-uint8_t   propulsionState  = 0;   // track if the LED is illuminated
+uint8_t   propulsion = 0;
+uint8_t   propulsion_before = 0;
+uint8_t   propulsionState  = 0;
 uint16_t  glow_time  = 200; // in milliseconds
 
-uint32_t  led_timer  = 0;   // track when the light turned on or off
+uint32_t  led_timer  = 0;
 
 // Keep a full 32-bit distance internally:
 uint32_t distance = 0; // in millimeters (full 32-bit)
@@ -58,43 +58,42 @@ uint32_t distance = 0; // in millimeters (full 32-bit)
 uint16_t distance_hi = 0; // upper 16 bits of distance
 uint16_t distance_lo = 0; // lower 16 bits of distance
 
+// Joulemeter energy (CAN ID 0x500, bytes B4567, uint32, energy * 1000)
+uint32_t joulemeter_energy = 0; // millijoules * 1000
+uint16_t joulemeter_hi = 0;
+uint16_t joulemeter_lo = 0;
+
 // Instantiate the communication interface's management object
 eui_interface_t serial_comms = EUI_INTERFACE( &serial_write ); 
 
 // Electric UI manages variables referenced in this array
-// Use two 16-bit fields since EUI_UINT32 may not be defined in your library
 eui_message_t tracked_variables[] = 
 {
-  EUI_UINT8(  "led_blink",  propulsion ),
-  EUI_UINT8(  "propulsionState",  propulsionState ),
-  EUI_UINT16( "lit_time",   glow_time ),
-  EUI_UINT16( "distance_hi", distance_hi ),
-  EUI_UINT16( "distance_lo", distance_lo )
+  EUI_UINT8(  "led_blink",      propulsion ),
+  EUI_UINT8(  "propulsionState", propulsionState ),
+  EUI_UINT16( "lit_time",       glow_time ),
+  EUI_UINT16( "distance_hi",    distance_hi ),
+  EUI_UINT16( "distance_lo",    distance_lo ),
+  EUI_UINT16( "joulemeter_hi",  joulemeter_hi ),
+  EUI_UINT16( "joulemeter_lo",  joulemeter_lo ),
 };
 
 void setup() 
 {
-  // Setup the serial port and status LED
   Serial.begin( 115200 );
   pinMode( LED_BUILTIN, OUTPUT );
 
-  // ------------ LoRA & ElectricUI setup
-  // Provide the library with the interface we just setup
   eui_setup_interface( &serial_comms );
-
-  // Provide the tracked variables to the library
   EUI_TRACK( tracked_variables );
-
-  // Provide a identifier to make this board easy to find in the UI
   eui_setup_identifier( "hello", 5 );
 
   led_timer = millis();
 
   Mcu.begin(HELTEC_BOARD, SLOW_CLK_TPYE);
 
-  RadioEvents.TxDone = OnTxDone;
+  RadioEvents.TxDone    = OnTxDone;
   RadioEvents.TxTimeout = OnTxTimeout;
-  RadioEvents.RxDone = OnRxDone;
+  RadioEvents.RxDone    = OnRxDone;
   RadioEvents.RxTimeout = OnRxTimeout;
 
   Radio.Init(&RadioEvents);
@@ -120,8 +119,8 @@ void sendRelayCommand(uint8_t dst, uint8_t on_off) {
   pkt[idx++] = SRC_ID;
   pkt[idx++] = dst;
   pkt[idx++] = CMD_RELAY;
-  pkt[idx++] = 1;        // LEN
-  pkt[idx++] = on_off;   // payload byte
+  pkt[idx++] = 1;
+  pkt[idx++] = on_off;
 
   uint8_t chk = computeXor(pkt, idx);
   pkt[idx++] = chk;
@@ -130,15 +129,11 @@ void sendRelayCommand(uint8_t dst, uint8_t on_off) {
   lora_idle = false;
   Radio.Send(pkt, idx);
 
-  // Clear ack flag then wait a short while for ACK to arrive (ACK arrival will be set in OnRxDone)
   ack_received = false;
   ack_from = 0;
 }
 
 // Decode distance from a data buffer (big-endian).
-// - If dlc >= 4: interpret as 32-bit big-endian; 0xFFFFFFFF => TIMEOUT
-// - Else if dlc >= 2: interpret as 16-bit big-endian; 0xFFFF => TIMEOUT
-// - Else: return 0
 uint32_t decodeDistanceFromBytes(const uint8_t *data, uint8_t dlc) {
   if (dlc >= 4) {
     uint32_t v = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) | ((uint32_t)data[2] << 8) | (uint32_t)data[3];
@@ -152,15 +147,19 @@ uint32_t decodeDistanceFromBytes(const uint8_t *data, uint8_t dlc) {
 }
 
 static inline void publishDistanceToUI(uint32_t dist) {
-  // store full internal value
-  distance = dist;
-  // split for UI fields
+  distance    = dist;
   distance_lo = (uint16_t)(dist & 0xFFFF);
   distance_hi = (uint16_t)((dist >> 16) & 0xFFFF);
-
-  // send both tracked fields so UI updates
   eui_send_tracked("distance_lo");
   eui_send_tracked("distance_hi");
+}
+
+static inline void publishJoulemeterToUI(uint32_t val) {
+  joulemeter_energy = val;
+  joulemeter_lo = (uint16_t)(val & 0xFFFF);
+  joulemeter_hi = (uint16_t)((val >> 16) & 0xFFFF);
+  eui_send_tracked("joulemeter_lo");
+  eui_send_tracked("joulemeter_hi");
 }
 
 // ---------- Radio callbacks ----------
@@ -172,14 +171,13 @@ void OnTxTimeout(void) {
   Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
 }
 
-// OnRxDone: handle wrapped CAN forwarded frames, simple forwarded CAN, binary ACKs, and binary relay responses
 void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
   if (size < 2) {
     Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
     return;
   }
 
-  // verify XOR checksum (last byte) if size >= 2
+  // verify XOR checksum
   if (size >= 2) {
     uint8_t chk_calc = 0;
     for (uint16_t i = 0; i < size - 1; ++i) chk_calc ^= payload[i];
@@ -189,67 +187,54 @@ void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
     }
   }
 
-  // Try to detect wrapped format first: [SRC][DST][CMD][LEN][ID_hi][ID_lo][DLC][data...][CHK]
+  // Wrapped format: [SRC][DST][CMD][LEN][ID_hi][ID_lo][DLC][data...][CHK]
   if (size >= 5) {
-    uint8_t src = payload[0];
-    uint8_t dst = payload[1];
-    uint8_t cmd = payload[2];
+    uint8_t src       = payload[0];
+    uint8_t dst       = payload[1];
+    uint8_t cmd       = payload[2];
     uint8_t len_field = payload[3];
 
-    // If the size matches header + len_field + checksum, it's likely the wrapped/binary message
     if ((uint16_t)(len_field + 5) == size) {
 
-      // ACK handling
       if (cmd == CMD_ACK) {
-        // is this ACK for me?
         if (dst == SRC_ID) {
-          ack_from = src;
+          ack_from     = src;
           ack_received = true;
         }
         Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
         return;
       }
 
-      // CMD_CAN_FORWARD wrapped payload
       if (cmd == CMD_CAN_FORWARD) {
-        // payload[4] = ID_hi, payload[5] = ID_lo, payload[6] = DLC, payload[7..] = data
         if (len_field >= 3) {
           uint16_t can_id = ((uint16_t)payload[4] << 8) | (uint16_t)payload[5];
-          uint8_t dlc = payload[6];
+          uint8_t  dlc    = payload[6];
           if (dlc > 8) dlc = 8;
           uint8_t avail = len_field - 3;
           if (dlc > avail) dlc = avail;
 
-          //Serial.printf("Wrapped CAN packet: CAN_ID=0x%03X DLC=%u\n", can_id, dlc);
-          //Serial.print("Wrapped CAN data:");
-          //for (uint8_t i = 0; i < dlc; ++i) Serial.printf(" 0x%02X", payload[7 + i]);
-          //Serial.println();
-
-          // If ultrasonic ID, decode distance supporting 32-bit and 16-bit
+          // Ultrasonic distance — CAN ID 0x0100, B0-3 (or B0-1 for 16-bit fallback)
           if (can_id == 0x0100 && dlc >= 2) {
             uint32_t dist = decodeDistanceFromBytes(&payload[7], dlc);
             if (dlc >= 4) {
-              if (dist == 0xFFFFFFFFUL){}//Serial.println("Ultrasonic (wrapped): TIMEOUT (0xFFFFFFFF)");
-              else {
-                //Serial.printf("Ultrasonic (wrapped): %lu mm (32-bit)\n", (unsigned long)dist);
-                publishDistanceToUI(dist);
-              }
-            } else { // 2-byte fallback
-              if (dist == 0xFFFF) {}//Serial.println("Ultrasonic (wrapped): TIMEOUT (0xFFFF)");
-              else {
-                //Serial.printf("Ultrasonic (wrapped): %u mm (16-bit)\n", (unsigned int)dist);
-                publishDistanceToUI(dist);
-              }
+              if (dist != 0xFFFFFFFFUL) publishDistanceToUI(dist);
+            } else {
+              if (dist != 0xFFFF) publishDistanceToUI(dist);
             }
           }
-        } else {
-          //Serial.println("CMD_CAN_FORWARD payload too short");
+
+          // Joulemeter energy — CAN ID 0x0500, B4-7 (uint32, value * 1000)
+          if (can_id == 0x0500 && dlc >= 8) {
+            const uint8_t *d = &payload[7];
+            uint32_t energy = ((uint32_t)d[4] << 24) | ((uint32_t)d[5] << 16) |
+                              ((uint32_t)d[6] << 8)  | (uint32_t)d[7];
+            if (energy != 0xFFFFFFFFUL) publishJoulemeterToUI(energy);
+          }
         }
         Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
         return;
       }
 
-      // CMD_RELAY might be delivered to other nodes — remote doesn't act on it here
       if (cmd == CMD_RELAY) {
         Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
         return;
@@ -262,30 +247,30 @@ void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
 
   // Fallback: simple forwarded CAN: [ID_hi][ID_lo][DLC][data...][CHK]
   if (size >= 4) {
-    uint8_t id_hi = payload[0];
-    uint8_t id_lo = payload[1];
+    uint8_t  id_hi  = payload[0];
+    uint8_t  id_lo  = payload[1];
     uint16_t can_id = ((uint16_t)id_hi << 8) | (uint16_t)id_lo;
-    uint8_t dlc = payload[2];
+    uint8_t  dlc    = payload[2];
     if (dlc > 8) dlc = 8;
-    // make sure we don't read past packet
     uint8_t possible_dlc = size - 4;
     if (dlc > possible_dlc) dlc = possible_dlc;
 
+    // Ultrasonic distance
     if (can_id == 0x0100 && dlc >= 2) {
       uint32_t dist = decodeDistanceFromBytes(&payload[3], dlc);
       if (dlc >= 4) {
-        if (dist == 0xFFFFFFFFUL) {}//Serial.println("Ultrasonic: TIMEOUT (0xFFFFFFFF)");
-        else {
-          //Serial.printf("Ultrasonic: %lu mm (32-bit)\n", (unsigned long)dist);
-          publishDistanceToUI(dist);
-        }
+        if (dist != 0xFFFFFFFFUL) publishDistanceToUI(dist);
       } else {
-        if (dist == 0xFFFF) {}//Serial.println("Ultrasonic: TIMEOUT (0xFFFF)");
-        else {
-          //Serial.printf("Ultrasonic: %u mm (16-bit)\n", (unsigned int)dist);
-          publishDistanceToUI(dist);
-        }
+        if (dist != 0xFFFF) publishDistanceToUI(dist);
       }
+    }
+
+    // Joulemeter energy
+    if (can_id == 0x0500 && dlc >= 8) {
+      const uint8_t *d = &payload[3];
+      uint32_t energy = ((uint32_t)d[4] << 24) | ((uint32_t)d[5] << 16) |
+                        ((uint32_t)d[6] << 8)  | (uint32_t)d[7];
+      if (energy != 0xFFFFFFFFUL) publishJoulemeterToUI(energy);
     }
 
     Radio.Sleep(); delay(2); Radio.Rx(0); lora_idle = true;
@@ -301,11 +286,10 @@ void OnRxTimeout(void) { Radio.Rx(0); lora_idle = true; }
 void loop() 
 {
   Radio.IrqProcess();
+  serial_rx_handler();
 
-  serial_rx_handler();  //check for new inbound data
-
-  if( propulsion != propulsion_before ){
-    if(propulsion == 1){
+  if (propulsion != propulsion_before) {
+    if (propulsion == 1) {
       sendRelayCommand(BRIDGE_ID, 0x01);
       propulsionState = 1;
     } else {
@@ -318,27 +302,23 @@ void loop()
   static unsigned long lastCheck = 0;
   unsigned long now = millis();
   if ((now - lastCheck) > 300) {
-    if (ack_received) {
-      ack_received = false;
-    }
+    if (ack_received) ack_received = false;
     lastCheck = now;
   }
 
   delay(10);
-
-  digitalWrite( LED_BUILTIN, propulsionState ); //update the LED to match the intended state
+  digitalWrite(LED_BUILTIN, propulsionState);
 }
 
 void serial_rx_handler()
 {
-  // While we have data, we will pass those bytes to the ElectricUI parser
-  while( Serial.available() > 0 )  
+  while (Serial.available() > 0)  
   {  
-    eui_parse( Serial.read(), &serial_comms );  // Ingest a byte
+    eui_parse(Serial.read(), &serial_comms);
   }
 }
   
-void serial_write( uint8_t *data, uint16_t len )
+void serial_write(uint8_t *data, uint16_t len)
 {
-  Serial.write( data, len ); //output on the main serial port
+  Serial.write(data, len);
 }

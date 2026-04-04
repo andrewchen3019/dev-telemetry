@@ -1,5 +1,5 @@
 // OverviewPage.tsx
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { RouteComponentProps } from '@reach/router'
 
 import {
@@ -10,12 +10,10 @@ import {
   VerticalAxis,
 } from '@electricui/components-desktop-charts'
 
-import { Card, Button } from '@blueprintjs/core'
-import { IntervalRequester, useDeviceManager } from '@electricui/components-core'
+import { Card } from '@blueprintjs/core'
+import { IntervalRequester } from '@electricui/components-core'
 import { useMessageDataSource } from '@electricui/core-timeseries'
 import { Slider, Switch } from '@electricui/components-desktop-blueprint'
-import { Statistic } from '@electricui/components-desktop-blueprint'
-
 
 const gridStyle: React.CSSProperties = {
   display: 'grid',
@@ -25,9 +23,19 @@ const gridStyle: React.CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
   padding: '12px',
-  gridAutoRows: 'minmax(120px, auto)'
+  gridAutoRows: 'minmax(120px, auto)',
 }
-function getLatestFromDataSource(dataSource: any) {
+
+const cardFullStyle: React.CSSProperties = {
+  height: '100%',
+  flexDirection: 'column',
+  boxSizing: 'border-box',
+  textAlign: 'center',
+}
+
+const cellStyle: React.CSSProperties = {}
+
+function getLatestFromDataSource(dataSource: any): number | undefined {
   if (!dataSource) return undefined
   if (typeof dataSource.getLatest === 'function') {
     try { return dataSource.getLatest() } catch {}
@@ -48,6 +56,7 @@ function getLatestFromDataSource(dataSource: any) {
   }
   return undefined
 }
+
 function makeSafeDataSource(original: any) {
   const noop = {
     subscribe: (_cb: any) => () => {},
@@ -60,13 +69,7 @@ function makeSafeDataSource(original: any) {
 
   const origHasCapability = typeof original.hasCapability === 'function'
     ? (cap: string) => !!original.hasCapability(cap)
-    : (_cap: string) => {
-        try {
-          if (Array.isArray(original.capabilities)) return original.capabilities.includes(_cap as any)
-          if (original.capabilities && typeof original.capabilities[_cap] !== 'undefined') return !!original.capabilities[_cap]
-        } catch (e) {}
-        return false
-      }
+    : (_cap: string) => false
 
   if (typeof original.subscribe === 'function') {
     return {
@@ -92,20 +95,13 @@ function makeSafeDataSource(original: any) {
         }
         return []
       },
-      isQueryableCollection: () => {
-        try {
-          if (typeof original.isQueryableCollection === 'function') return !!original.isQueryableCollection()
-          if (original.isQueryableCollection !== undefined) return !!original.isQueryableCollection
-        } catch (e) {}
-        return false
-      },
+      isQueryableCollection: () => false,
     }
   }
 
-  // Polling wrapper
+  // Polling wrapper fallback
   return {
     subscribe: (cb: any) => {
-      const intervalMs = 100
       let lastSeen: any = undefined
       const tid = window.setInterval(() => {
         const latest = getLatestFromDataSource(original)
@@ -113,297 +109,228 @@ function makeSafeDataSource(original: any) {
           lastSeen = latest
           try { cb(latest) } catch (e) {}
         }
-      }, intervalMs)
+      }, 100)
       return () => { window.clearInterval(tid) }
     },
     getLatest: () => getLatestFromDataSource(original),
-    hasCapability: (cap: string) => {
-      if (cap === 'subscribe') return true
-      if (cap === 'getLatest') return getLatestFromDataSource(original) !== undefined
-      return origHasCapability(cap)
-    },
+    hasCapability: (cap: string) => cap === 'subscribe' || cap === 'getLatest',
     getRange: (_opts?: any) => [],
-    isQueryableCollection: () => {
-      try { if (original.isQueryableCollection !== undefined) return !!original.isQueryableCollection } catch (e) {}
-      return false
-    },
+    isQueryableCollection: () => false,
   }
 }
+
+// Hook to poll a single data source into a numeric state value
+function useLatestValue(dataSource: any, intervalMs = 150): number | null {
+  const [value, setValue] = useState<number | null>(null)
+  useEffect(() => {
+    if (!dataSource) return
+    if (typeof dataSource.subscribe === 'function') {
+      try {
+        const unsub = dataSource.subscribe((v: any) => {
+          const n = typeof v === 'number' ? v : (v?.value ?? v?.y ?? undefined)
+          if (typeof n === 'number') setValue(n)
+        })
+        return () => { if (typeof unsub === 'function') unsub() }
+      } catch {}
+    }
+    const pid = window.setInterval(() => {
+      const latest = getLatestFromDataSource(dataSource)
+      if (typeof latest === 'number') setValue(latest)
+    }, intervalMs)
+    return () => window.clearInterval(pid)
+  }, [dataSource])
+  return value
+}
+
+// Hook to reconstruct a 32-bit value from hi/lo data sources
+function useReconstructed32(loSource: any, hiSource: any, intervalMs = 150): number | null {
+  const [value, setValue] = useState<number | null>(null)
+  useEffect(() => {
+    if (!loSource || !hiSource) return
+    const pid = window.setInterval(() => {
+      const lo = getLatestFromDataSource(loSource)
+      const hi = getLatestFromDataSource(hiSource)
+      if (typeof lo === 'number' && typeof hi === 'number') {
+        setValue(((hi << 16) | lo) >>> 0)
+      }
+    }, intervalMs)
+    return () => window.clearInterval(pid)
+  }, [loSource, hiSource])
+  return value
+}
+
 export const OverviewPage = (props: RouteComponentProps) => {
-   const ledStateDataSource = useMessageDataSource('led_state')
-  const batteryEfficiencyDataSource = useMessageDataSource('battery')
-  const speedDataSource = useMessageDataSource('speed')
-  const distanceDataSource = useMessageDataSource('distance_lo')
-  const rssiDataSource = useMessageDataSource('rssi')
-  const propulsionStateDataSource = useMessageDataSource('propulsion_state')
+  // Data sources
+  const motorRpmLoSource      = useMessageDataSource('motor_rpm_lo')
+  const motorRpmHiSource      = useMessageDataSource('motor_rpm_hi')
+  const throttleSource        = useMessageDataSource('throttle_pct')
+  const joulemeterLoSource    = useMessageDataSource('joulemeter_lo')
+  const joulemeterHiSource    = useMessageDataSource('joulemeter_hi')
+  const joulemeterCurrentSrc  = useMessageDataSource('joulemeter_current')
+  const joulemeterVoltageSrc  = useMessageDataSource('joulemeter_voltage')
 
+  // Propulsion sources (kept for functionality, not displayed)
+  const propulsionStateSource = useMessageDataSource('propulsion_state')
 
-    // Last distance numeric
-  const [lastDistance, setLastDistance] = useState<number | null>(null)
-  useEffect(() => {
-    if (!distanceDataSource) return
-    if (typeof distanceDataSource.subscribe === 'function') {
-      try {
-        const unsub = distanceDataSource.subscribe((v: any) => {
-          const val = typeof v === 'number'
-            ? v
-            : (v && (v.value ?? v.y ?? v.latest ?? (Array.isArray(v.data) ? v.data[v.data.length - 1] : undefined))) ?? undefined
-          if (typeof val === 'number') setLastDistance(val)
-        })
-        return () => { if (typeof unsub === 'function') unsub() }
-      } catch (err) {
-        console.warn('distanceDataSource.subscribe threw, falling back to poll', err)
-      }
-    }
-    const pid = window.setInterval(() => {
-      try {
-        const latest = getLatestFromDataSource(distanceDataSource)
-        if (typeof latest === 'number') setLastDistance(latest)
-      } catch (e) {}
-    }, 150)
-    return () => window.clearInterval(pid)
-  }, [distanceDataSource])
+  // Numeric values
+  const rawRpm        = useReconstructed32(motorRpmLoSource, motorRpmHiSource)
+  const lastRpm       = rawRpm !== null ? rawRpm / 1000 : null           // true RPM
 
-  // Last RSSI numeric
-  const [lastRssi, setLastRssi] = useState<number | null>(null)
-  useEffect(() => {
-    if (!rssiDataSource) return
-    if (typeof rssiDataSource.subscribe === 'function') {
-      try {
-        const unsub = rssiDataSource.subscribe((v: any) => {
-          if (typeof v === 'number') {
-            setLastRssi(v > 200 ? v - 256 : v)
-          } else if (v && typeof v.value === 'number') {
-            const n = v.value
-            setLastRssi(n > 200 ? n - 256 : n)
-          }
-        })
-        return () => { if (typeof unsub === 'function') unsub() }
-      } catch (err) {
-        console.warn('rssiDataSource.subscribe threw, falling back to poll', err)
-      }
-    }
-    const pid = window.setInterval(() => {
-      try {
-        const latest = getLatestFromDataSource(rssiDataSource)
-        if (typeof latest === 'number') setLastRssi(latest > 200 ? latest - 256 : latest)
-      } catch (e) {}
-    }, 200)
-    return () => window.clearInterval(pid)
-  }, [rssiDataSource])
+  const rawThrottle   = useLatestValue(throttleSource)
+  const lastThrottle  = rawThrottle !== null ? rawThrottle / 10 : null   // true %
 
-  // Safe sources for charts
-  const safeDistanceSource = useMemo(() => makeSafeDataSource(distanceDataSource), [distanceDataSource])
-  const safeRssiSource = useMemo(() => makeSafeDataSource(rssiDataSource), [rssiDataSource])
+  const rawEnergy     = useReconstructed32(joulemeterLoSource, joulemeterHiSource)
+  const lastEnergy    = rawEnergy !== null ? rawEnergy / 1000 : null     // joules
 
-  // debug logging (open DevTools -> Console)
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('raw distanceDataSource:', distanceDataSource)
-    // eslint-disable-next-line no-console
-    console.log('wrapped safeDistanceSource:', safeDistanceSource)
-    // eslint-disable-next-line no-console
-    console.log('raw rssiDataSource:', rssiDataSource)
-  }, [distanceDataSource, rssiDataSource, safeDistanceSource])
+  const rawCurrent    = useLatestValue(joulemeterCurrentSrc)
+  const lastCurrent   = rawCurrent !== null ? rawCurrent / 1000 : null   // amps
 
-  // helper card style for consistency
-  const cardFullStyle: React.CSSProperties = {
-    height: '100%',
-    // display: 'flex',
-    flexDirection: 'column',
-    boxSizing: 'border-box',
-    textAlign: 'center'
-  }
-  const switchStyle: React.CSSProperties = {
-    height: '100px'
-  }
+  const rawVoltage    = useLatestValue(joulemeterVoltageSrc)
+  const lastVoltage   = rawVoltage !== null ? rawVoltage / 1000 : null   // volts
 
-  // helper wrapper for grid children so gridAutoRows applies and each child stretches
-  const cellStyle: React.CSSProperties = {
-    // height: '100%',
-    // display: 'flex',
-  }
+  // Safe chart sources
+  const safeRpmSource      = useMemo(() => makeSafeDataSource(motorRpmLoSource), [motorRpmLoSource])
+  const safeThrottleSource = useMemo(() => makeSafeDataSource(throttleSource), [throttleSource])
+  const safeEnergySource   = useMemo(() => makeSafeDataSource(joulemeterLoSource), [joulemeterLoSource])
+  const safeCurrentSource  = useMemo(() => makeSafeDataSource(joulemeterCurrentSrc), [joulemeterCurrentSrc])
+  const safeVoltageSource  = useMemo(() => makeSafeDataSource(joulemeterVoltageSrc), [joulemeterVoltageSrc])
 
   return (
     <React.Fragment>
-      <IntervalRequester interval={50} messageIDs={['propulsion_state','battery','speed','distance_lo','rssi']} />
+      <IntervalRequester
+        interval={50}
+        messageIDs={[
+          'motor_rpm_lo', 'motor_rpm_hi',
+          'throttle_pct',
+          'joulemeter_lo', 'joulemeter_hi',
+          'joulemeter_current', 'joulemeter_voltage',
+          'propulsion_state',
+        ]}
+      />
 
       <div style={gridStyle}>
-        {/* Speed Chart */}
+
+        {/* RPM Chart */}
         <div style={cellStyle}>
           <Card style={cardFullStyle}>
-            <div style={{ padding: 12 }}><b>Speed</b></div>
+            <div style={{ padding: 12 }}><b>Motor RPM</b></div>
             <ChartContainer style={{ flex: 1, minHeight: 0 }}>
-              <LineChart key="speed" dataSource={speedDataSource} />
-              <RealTimeDomain window={10000} />
+              <LineChart key="rpm" dataSource={safeRpmSource} />
+              <RealTimeDomain window={15000} yMin={0} />
               <TimeAxis />
               <VerticalAxis />
             </ChartContainer>
-          </Card>
-        </div>
-
-        {/* Battery Chart */}
-        <div style={cellStyle}>
-          <Card style={cardFullStyle}>
-            <div className="title" style={{ padding: 12 }}><b>Battery Efficiency</b></div>
-            <ChartContainer style={{ flex: 1, minHeight: 0 }}>
-              <LineChart key="battery" dataSource={batteryEfficiencyDataSource} />
-              <RealTimeDomain window={10000} />
-              <TimeAxis />
-              <VerticalAxis />
-            </ChartContainer>
-          </Card>
-        </div>
-
-        {/* Distance Chart */}
-        <div style={cellStyle}>
-          <Card style={cardFullStyle}>
-            <div style={{ padding: 12 }}><b>Ultrasonic Distance (mm)</b></div>
-
-            <ChartContainer style={{ flex: 1, minHeight: 0 }}>
-              <LineChart key="distance" dataSource={distanceDataSource} />
-              <RealTimeDomain window={15000} yMin={0} yMaxSoft={100}/>
-              <TimeAxis />
-              <VerticalAxis />
-            </ChartContainer>
-
-            {/* Live numeric readout */}
             <div style={{ padding: 12, textAlign: 'center' }}>
-              <div style={{ fontSize: 12, color: '#666' }}>Latest Value</div>
+              <div style={{ fontSize: 12, color: '#666' }}>Latest</div>
               <div style={{ fontSize: 24, fontWeight: 600 }}>
-                {lastDistance === null ? '—' : `${lastDistance.toFixed(0)} mm`}
+                {lastRpm === null ? '—' : `${lastRpm.toFixed(0)} RPM`}
               </div>
             </div>
           </Card>
         </div>
 
-        {/* Slider */}
+        {/* Throttle Chart */}
         <div style={cellStyle}>
           <Card style={cardFullStyle}>
-            <div style={{ margin:12 }}>
-              <div style={{ marginBottom:8 }}>Transmission Frequency (ms)</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <Slider min={20} max={250} stepSize={5} labelStepSize={20} sendOnlyOnRelease>
-                  <Slider.Handle accessor="lit_time" />
-                </Slider>
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        {/* Propulsion + Voltage */}
-        <div style={cellStyle}>
-          <Card style={cardFullStyle}>
-            <div>
-              <div >
-                <Switch
-                  unchecked={0}
-                  checked={1}
-                  accessor={state => state.led_blink}
-                  writer={(state, value) => {
-                    state.led_blink = value
-                  }}
-                  style={switchStyle}
-                >
-                  Toggle propulsion
-                </Switch>
-              </div>
-
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#666', margin: 20 }}>Propulsion Voltage</div>
-                <div style={{ fontSize: 24 }}>
-                  {/* Uncomment and use Statistic when you want to show live voltage */}
-                  {/* <Statistic accessor="voltage" label="" suffix="V" formatter={(value: number) => value?.toFixed(2)}/> */}
-                  — V
-                </div>
-              </div>
-            </div>
-
-            {/* optional bottom filler so card content looks balanced */}
-            <div style={{ padding: 12, marginTop: 'auto' }}>
-              {/* any extra info */}
-            </div>
-          </Card>
-        </div>
-
-        {/* RSSI Chart + numeric */}
-        <div style={cellStyle}>
-          <Card style={cardFullStyle}>
-            <div style={{ textAlign:'center', marginBottom:8, paddingTop: 12 }}><b>RSSI (dBm)</b></div>
+            <div style={{ padding: 12 }}><b>Throttle</b></div>
             <ChartContainer style={{ flex: 1, minHeight: 0 }}>
-              <LineChart key="rssi" dataSource={safeRssiSource} />
-              <RealTimeDomain window={15000} />
+              <LineChart key="throttle" dataSource={safeThrottleSource} />
+              <RealTimeDomain window={15000} yMin={0} yMaxSoft={100} />
               <TimeAxis />
               <VerticalAxis />
             </ChartContainer>
-            <div style={{ padding:12, textAlign:'center' }}>
-              <div style={{ fontSize:12, color:'#666' }}>Last RSSI</div>
-              <div style={{ fontSize:20 }}>{lastRssi === null ? '—' : `${lastRssi} dBm`}</div>
+            <div style={{ padding: 12, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#666' }}>Latest</div>
+              <div style={{ fontSize: 24, fontWeight: 600 }}>
+                {lastThrottle === null ? '—' : `${lastThrottle.toFixed(1)} %`}
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Energy Chart */}
+        <div style={cellStyle}>
+          <Card style={cardFullStyle}>
+            <div style={{ padding: 12 }}><b>Accumulated Energy</b></div>
+            <ChartContainer style={{ flex: 1, minHeight: 0 }}>
+              <LineChart key="energy" dataSource={safeEnergySource} />
+              <RealTimeDomain window={15000} yMin={0} />
+              <TimeAxis />
+              <VerticalAxis />
+            </ChartContainer>
+            <div style={{ padding: 12, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#666' }}>Latest</div>
+              <div style={{ fontSize: 24, fontWeight: 600 }}>
+                {lastEnergy === null ? '—' : `${lastEnergy.toFixed(2)} J`}
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Current Chart */}
+        <div style={cellStyle}>
+          <Card style={cardFullStyle}>
+            <div style={{ padding: 12 }}><b>Current</b></div>
+            <ChartContainer style={{ flex: 1, minHeight: 0 }}>
+              <LineChart key="current" dataSource={safeCurrentSource} />
+              <RealTimeDomain window={15000} yMin={0} />
+              <TimeAxis />
+              <VerticalAxis />
+            </ChartContainer>
+            <div style={{ padding: 12, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#666' }}>Latest</div>
+              <div style={{ fontSize: 24, fontWeight: 600 }}>
+                {lastCurrent === null ? '—' : `${lastCurrent.toFixed(3)} A`}
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Voltage Chart */}
+        <div style={cellStyle}>
+          <Card style={cardFullStyle}>
+            <div style={{ padding: 12 }}><b>Voltage</b></div>
+            <ChartContainer style={{ flex: 1, minHeight: 0 }}>
+              <LineChart key="voltage" dataSource={safeVoltageSource} />
+              <RealTimeDomain window={15000} yMin={0} />
+              <TimeAxis />
+              <VerticalAxis />
+            </ChartContainer>
+            <div style={{ padding: 12, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#666' }}>Latest</div>
+              <div style={{ fontSize: 24, fontWeight: 600 }}>
+                {lastVoltage === null ? '—' : `${lastVoltage.toFixed(3)} V`}
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Transmission frequency slider — kept as a useful control */}
+        <div style={cellStyle}>
+          <Card style={cardFullStyle}>
+            <div style={{ margin: 12 }}>
+              <div style={{ marginBottom: 8 }}>Transmission Frequency (ms)</div>
+              <Slider min={20} max={250} stepSize={5} labelStepSize={20} sendOnlyOnRelease>
+                <Slider.Handle accessor="lit_time" />
+              </Slider>
             </div>
           </Card>
         </div>
 
       </div>
+
+      {/* Propulsion switch — hidden from view but kept in DOM so ElectricUI state is maintained */}
+      <div style={{ display: 'none' }}>
+        <Switch
+          unchecked={0}
+          checked={1}
+          accessor={state => state.led_blink}
+          writer={(state, value) => { state.led_blink = value }}
+        >
+          Toggle propulsion
+        </Switch>
+      </div>
+
     </React.Fragment>
   )
-
-
-  // return (
-  //   <React.Fragment>
-  //     <IntervalRequester interval={50} messageIDs={['propulsion_state']} />
-
-  //     <Composition areas={layoutDescription} gap={10} autoCols="1fr">
-  //       {Areas => (
-  //         <React.Fragment>
-  //           <Areas.Chart>
-  //             <Card>
-  //               <div style={{ textAlign: 'center', marginBottom: '1em' }}>
-  //                 <b>propulsion State</b>
-  //               </div>
-  //               <ChartContainer>
-  //                 <LineChart dataSource={propulsionStateDataSource} />
-  //                 <RealTimeDomain window={10000} />
-  //                 <TimeAxis />
-  //                 <VerticalAxis />
-  //               </ChartContainer>
-  //             </Card>
-  //           </Areas.Chart>
-
-  //           <Areas.Light>
-  //             <LightBulb
-  //               containerStyle={{ margin: '20px auto', width: '80%' }}
-  //               width="40vw"
-  //             />
-  //           </Areas.Light>
-  //           <Areas.Slider>
-  //             <Card>
-  //               <div>
-  //                 propulsion state: <Printer accessor="propulsion_state" />
-  //                 <Switch
-  //               unchecked={0}
-  //               checked={1}
-  //               accessor={state => state.led_blink}
-  //               writer={(state, value) => {
-  //                 state.led_blink = value
-  //               }}
-  //             >
-  //               Toggle propulsion Blinker
-  //             </Switch>
-  //                 <Slider
-  //                   min={20}
-  //                   max={1020}
-  //                   stepSize={10}
-  //                   labelStepSize={100}
-  //                   sendOnlyOnRelease
-  //                 >
-  //                   <Slider.Handle accessor="lit_time" />
-  //                 </Slider>
-  //               </div>
-  //             </Card>
-  //           </Areas.Slider>
-  //         </React.Fragment>
-  //       )}
-  //     </Composition>
-  //   </React.Fragment>
-  // )
 }
