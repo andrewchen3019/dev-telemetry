@@ -1,4 +1,5 @@
 // can_to_heltec_lora_bridge_decodes_32bit.ino
+//this is for the end that connects into the car!!
 // Simplified CAN -> LoRa bridge. Forwards CAN frames as binary packets.
 // Listens for LoRa CMD_RELAY commands only and toggles an attached relay.
 // Forwards all CAN IDs: 0x100 (ultrasonic), 0x300 (RPM), 0x400 (throttle), 0x500 (joulemeter)
